@@ -24,6 +24,8 @@ pub mod state;
 pub mod swarm;
 pub mod tasks;
 pub mod voice;
+#[cfg(feature = "watcher")]
+pub mod watcher;
 pub mod workspace;
 
 use crate::agent::AgentManager;
@@ -153,6 +155,8 @@ pub fn run() {
         skills: skills.clone(),
         architect: architect.clone(),
         resolver: resolver.clone(),
+        #[cfg(feature = "watcher")]
+        watcher: parking_lot::RwLock::new(None),
     };
 
     tauri::Builder::default()
@@ -171,6 +175,25 @@ pub fn run() {
             architect.spawn_loop();
             chat_queue.set_app_handle(app.handle().clone());
             chat_queue.clone().spawn();
+
+            // Watcher (feature-gated). Disabled silently if GEMINI_API_KEY
+            // is missing — the supervisor logs a single warning and the
+            // rest of the app keeps working unaware.
+            #[cfg(feature = "watcher")]
+            {
+                let st = app.state::<AppState>();
+                match crate::watcher::Watcher::new(st.db.clone(), st.agent_mgr.clone()) {
+                    Ok(w) => {
+                        let w = Arc::new(w);
+                        *st.watcher.write() = Some(w.clone());
+                        w.spawn(app.handle().clone());
+                        tracing::info!("watcher: spawned (gemma-3-4b-it)");
+                    }
+                    Err(e) => {
+                        tracing::warn!("watcher disabled: {}", e);
+                    }
+                }
+            }
 
             // Wire the MCP handle into the agent manager BEFORE
             // `restore_session` runs so re-spawned Claude tiles also pick up
@@ -208,6 +231,8 @@ pub fn run() {
                         task_mgr: st.task_mgr.clone(),
                         memory: st.memory.clone(),
                         resolver: st.resolver.clone(),
+                        #[cfg(feature = "watcher")]
+                        watcher: st.watcher.read().clone(),
                     };
                     let bind = std::net::SocketAddr::from(([127, 0, 0, 1], port));
                     tauri::async_runtime::spawn(async move {

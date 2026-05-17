@@ -81,6 +81,55 @@ OmniRouter (OpenAI-compatible) remains available — switch via
 for the full feature list (streaming, tool calls, prompt caching, fallback
 policy).
 
+## Watcher (опционально)
+
+Watcher — фоновый супервизор, который слушает stdout каждого спавненного
+агента, классифицирует чанки через Google Gemini AI Studio
+(`gemma-3-4b-it`) и эскалирует «вопросы к человеку» Architect'у в почтовый
+ящик `role:coordinator`, на тред `watcher:<agent_id>`. Ответ Architect'а
+автоматически инжектится обратно в stdin исходного агента — агент не
+зависает на интерактивном prompt'е, пока вы не подойдёте.
+
+### Включить
+
+Опт-ин на этапе сборки:
+
+```bash
+cd src-tauri
+cargo build --features watcher
+# или для дебаг-запуска
+GEMINI_API_KEY=AIzaSy... cargo tauri dev --features watcher
+```
+
+Без `GEMINI_API_KEY` Watcher тихо отключится при старте (одна warning-строка
+в логах) — остальное приложение работает как обычно.
+
+### Переменные окружения
+
+| Переменная | По умолчанию | Назначение |
+|-|-|-|
+| `GEMINI_API_KEY` | — (обязательна) | Ключ Google AI Studio. Уходит только в заголовке `x-goog-api-key`, не в URL и не в логи. |
+| `PIGIDE_WATCHER_RPM` | `10` | Per-agent rate-limit (запросов в минуту). Token-bucket: при переполнении чанк дропается, не ставится в очередь. |
+
+### MCP-инструмент
+
+Когда Watcher активен, MCP-сервер регистрирует один новый инструмент:
+
+```json
+{ "method": "tools/call", "params": { "name": "watcher_status", "arguments": {} } }
+```
+
+Возвращает `{enabled, rpm, agents: { <agent_id>: {last_classification,
+calls_this_minute, blocked_until, dropped} }}` — удобно для дашбордов и для
+проверки, что бакет не залип.
+
+### Стоимость
+
+`gemma-3-4b-it` на AI Studio сейчас бесплатен в free-tier (15 RPM на проект,
+с лимитом по тонам в день). Дефолт `PIGIDE_WATCHER_RPM=10` подобран так,
+чтобы один агент не мог в одиночку выйти за per-project free-tier; если у
+вас десяток активных агентов — учитывайте, что лимит делится между ними.
+
 ## PigVoice — instant voice-to-text
 
 PigVoice is the streaming voice layer baked into PigIDE. Goal: **sub-300 ms perceived latency** from speech to first visible token, with partial hypotheses dropped straight into the focused input.

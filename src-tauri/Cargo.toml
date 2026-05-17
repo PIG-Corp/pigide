@@ -77,3 +77,11 @@ gpu-cuda = ["whisper-rs/cuda"]
 gpu-vulkan = ["whisper-rs/vulkan"]
 gpu-hipblas = ["whisper-rs/hipblas"]
 gpu-metal = ["whisper-rs/metal"]
+# Watcher — Gemini-backed supervisor that classifies agent stdout chunks and
+# escalates decision-requests to the Coordinator mailbox. Off by default (extra
+# build deps + outbound HTTP). Opt in:  cargo build --features watcher
+watcher = []
+
+[dev-dependencies]
+wiremock = "0.6"
+tokio-test = "0.4"

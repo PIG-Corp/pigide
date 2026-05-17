@@ -639,6 +639,8 @@ pub async fn mcp_start(
         task_mgr: state.task_mgr.clone(),
         memory: state.memory.clone(),
         resolver: state.resolver.clone(),
+        #[cfg(feature = "watcher")]
+        watcher: state.watcher.read().clone(),
     };
     let addr = crate::mcp::server::start(state.mcp.clone(), mcp_state, bind)
         .await

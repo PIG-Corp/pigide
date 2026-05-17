@@ -24,4 +24,9 @@ pub struct AppState {
     pub skills: Arc<SkillRegistry>,
     pub architect: Arc<Architect>,
     pub resolver: Arc<ResolverService>,
+    /// Watcher (Gemini-backed supervisor). Populated only when the `watcher`
+    /// feature is compiled in AND `GEMINI_API_KEY` was readable at boot.
+    #[cfg(feature = "watcher")]
+    pub watcher: parking_lot::RwLock<Option<Arc<crate::watcher::Watcher>>>,
 }
+

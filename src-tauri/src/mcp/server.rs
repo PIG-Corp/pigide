@@ -79,6 +79,11 @@ pub struct McpState {
     pub task_mgr: Arc<TaskManager>,
     pub memory: Arc<MemoryService>,
     pub resolver: Arc<crate::project_resolver::ResolverService>,
+    /// Watcher (Gemini supervisor). `None` when feature is off OR boot
+    /// failed (missing GEMINI_API_KEY). Used to back the `watcher_status`
+    /// MCP tool.
+    #[cfg(feature = "watcher")]
+    pub watcher: Option<Arc<crate::watcher::Watcher>>,
 }
 
 #[derive(Default)]
@@ -264,7 +269,7 @@ fn error_response(id: Option<Value>, code: i64, msg: &str) -> axum::response::Re
 
 fn tools_list_response() -> Value {
     let raw = orch_tools::tool_definitions();
-    let mut tools = Vec::with_capacity(raw.len());
+    let mut tools = Vec::with_capacity(raw.len() + 1);
     for entry in raw {
         if let Some(f) = entry.get("function") {
             let name = f.get("name").cloned().unwrap_or(Value::Null);
@@ -276,6 +281,15 @@ fn tools_list_response() -> Value {
                 "inputSchema": schema
             }));
         }
+    }
+    #[cfg(feature = "watcher")]
+    {
+        tools.push(json!({
+            "name": "watcher_status",
+            "description": "Per-agent Watcher (Gemini supervisor) stats: \
+last_classification, calls_this_minute, blocked_until, dropped.",
+            "inputSchema": {"type": "object", "properties": {}, "required": []}
+        }));
     }
     json!({"tools": tools})
 }
@@ -304,6 +318,25 @@ async fn dispatch_tool(
     if is_mutating(&name) && !scopes.iter().any(|s| s == "mutate" || s == "dangerous") {
         audit(&state.db, key.as_ref(), &name, &arguments, "denied:scope");
         return Err((-32002, format!("scope `mutate` required for {}", name)));
+    }
+
+    // Watcher status — feature-gated tool that doesn't live in the
+    // orchestrator dispatcher because it needs the Watcher handle.
+    #[cfg(feature = "watcher")]
+    if name == "watcher_status" {
+        let value = match state.watcher.as_ref() {
+            Some(w) => serde_json::to_value(w.status())
+                .map_err(|e| (-32603, format!("watcher_status serialize: {}", e)))?,
+            None => json!({
+                "enabled": false,
+                "rpm": 0,
+                "agents": {},
+                "note": "watcher feature compiled but disabled at boot \
+(check GEMINI_API_KEY)"
+            }),
+        };
+        audit(&state.db, key.as_ref(), &name, &arguments, "ok");
+        return Ok(value);
     }
 
     let result = orch_tools::dispatch(
