@@ -1,0 +1,69 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "PigIDE",
+  "version": "0.1.0",
+  "identifier": "dev.pigide.app",
+  "build": {
+    "beforeDevCommand": "pnpm --dir frontend dev",
+    "devUrl": "http://localhost:5173",
+    "beforeBuildCommand": "pnpm --dir frontend build",
+    "frontendDist": "../frontend/dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "PigIDE",
+        "width": 1280,
+        "height": 800,
+        "minWidth": 900,
+        "minHeight": 600,
+        "decorations": true,
+        "transparent": false,
+        "resizable": true,
+        "fullscreen": false,
+        "backgroundColor": "#0e0f12"
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["deb", "rpm", "appimage", "dmg", "nsis"],
+    "icon": [
+      "icons/icon.png"
+    ],
+    "category": "DeveloperTool",
+    "shortDescription": "PigIDE — tiled CLI agent IDE",
+    "longDescription": "Desktop IDE that hosts multiple interactive CLI agents (Kiro CLI, Claude Code) as tiled terminal panes, with a voice orchestrator that uses OmniRouter to manage workspaces and agents.",
+    "linux": {
+      "deb": {
+        "depends": ["libwebkit2gtk-4.1-0", "libgtk-3-0"]
+      }
+    },
+    "windows": {
+      "wix": {
+        "language": ["en-US", "ru-RU"]
+      }
+    },
+    "macOS": {
+      "minimumSystemVersion": "11.0"
+    }
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/pigide/pigide/releases/latest/download/latest.json"
+      ],
+      "dialog": false,
+      "pubkey": ""
+    },
+    "deep-link": {
+      "mobile": [],
+      "desktop": {
+        "schemes": ["pigide"]
+      }
+    }
+  }
+}

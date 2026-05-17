@@ -1,0 +1,21 @@
+// Re-export the lucide-react icons we use.
+export {
+  Maximize2,
+  Minimize2,
+  X,
+  Mic,
+  Plus,
+  Pencil,
+  Trash2,
+  Rows2 as RowsIcon,
+  Columns2 as ColumnsIcon,
+  Send,
+  Folder,
+  ChevronRight,
+  Settings,
+  ArrowLeft,
+  ArrowRight,
+  RotateCw,
+  Clock,
+  Loader,
+} from "lucide-react";

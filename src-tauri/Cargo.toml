@@ -1,0 +1,79 @@
+[package]
+name = "pigide"
+version = "0.1.0"
+edition = "2021"
+description = "PigIDE — desktop IDE with tiled CLI agents and voice orchestrator"
+license = "MIT"
+build = "build.rs"
+
+[lib]
+name = "pigide_lib"
+path = "src/lib.rs"
+
+[[bin]]
+name = "pigide"
+path = "src/main.rs"
+
+[[bin]]
+name = "pigide-cli"
+path = "src/bin/pigide-cli.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-shell = "2"
+tauri-plugin-global-shortcut = "2"
+tauri-plugin-updater = "2"
+tauri-plugin-notification = "2"
+tauri-plugin-deep-link = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+portable-pty = "0.8"
+rusqlite = { version = "0.31", features = ["bundled"] }
+r2d2 = "0.8"
+r2d2_sqlite = "0.24"
+reqwest = { version = "0.12", features = ["json", "stream"] }
+cpal = "0.15"
+whisper-rs = { version = "0.16", default-features = false }
+dirs = "5"
+uuid = { version = "1", features = ["v4", "serde"] }
+base64 = "0.22"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+anyhow = "1"
+thiserror = "1"
+once_cell = "1"
+parking_lot = "0.12"
+futures = "0.3"
+async-trait = "0.1"
+hound = "3"
+chrono = { version = "0.4", features = ["serde"] }
+regex = "1"
+slug = "0.1"
+gray_matter = { version = "0.2", default-features = false, features = ["yaml"] }
+notify = "6"
+notify-debouncer-full = "0.3"
+enigo = "0.3"
+arboard = "3"
+axum = "0.7"
+tower = "0.5"
+tower-http = { version = "0.6", features = ["cors", "trace"] }
+sha2 = "0.10"
+rand = "0.8"
+url = "2"
+
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
+# GPU backends for Whisper. Pick at most one. Default build is CPU-only.
+#   gpu-cuda     — NVIDIA, requires CUDA toolkit (libcublas, libcudart, nvcc)
+#   gpu-vulkan   — cross-vendor, requires Vulkan SDK
+#   gpu-hipblas  — AMD ROCm
+#   gpu-metal    — Apple Silicon
+gpu-cuda = ["whisper-rs/cuda"]
+gpu-vulkan = ["whisper-rs/vulkan"]
+gpu-hipblas = ["whisper-rs/hipblas"]
+gpu-metal = ["whisper-rs/metal"]

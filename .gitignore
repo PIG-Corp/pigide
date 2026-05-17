@@ -1,0 +1,42 @@
+# Rust
+/target
+**/target/
+Cargo.lock.bak
+
+# Node
+node_modules/
+.pnpm-store/
+.pnpm-debug.log*
+
+# Build artifacts
+dist/
+dist-ssr/
+*.local
+src-tauri/gen/
+src-tauri/target/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Env
+.env
+.env.*
+
+# Logs
+*.log
+logs/
+
+# Generated
+frontend/src/generated/
+
+# Kiro session exports (large, not source)
+pigide-buildup.json
+*.buildup.json
+
+# Local runtime data
+.pigmemory/
+

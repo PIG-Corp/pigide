@@ -1,0 +1,165 @@
+/* =========================================================================
+ * PigIDE — design tokens (Layer 1).
+ *
+ * Theme-AGNOSTIC tokens live here as static CSS custom properties.
+ * Theme-SPECIFIC tokens (palette + derived surfaces/rings/shadows) are set
+ * dynamically by `applyThemeToDom()` in src/themes/catalog.ts.
+ *
+ * Naming:
+ *   --space-{n}   spacing scale (4px base, like Tailwind)
+ *   --radius-{n}  corner radii
+ *   --shadow-{n}  elevation
+ *   --dur-{name}  transition durations
+ *   --ease-{name} easing curves
+ *   --z-{layer}   z-index layers
+ *   --font-*      typography
+ *   --text-{n}    type scale (font-size + line-height pair tokens)
+ *
+ * Anything that depends on the active theme uses --bg/--fg/--accent/etc.
+ * defined by the theme; do NOT hardcode hex values in component CSS.
+ * ========================================================================= */
+
+:root {
+  /* ── Typography ─────────────────────────────────────────── */
+  --font-sans:
+    -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI",
+    "Helvetica Neue", Roboto, "Liberation Sans", system-ui, sans-serif;
+  --font-mono:
+    ui-monospace, "JetBrains Mono", "Fira Code", "Cascadia Mono",
+    Menlo, Consolas, "Liberation Mono", monospace;
+
+  /* Type scale — paired font-size + line-height. Use the matching pair. */
+  --text-xs:   11px;
+  --text-xs-lh: 1.45;
+  --text-sm:   12px;
+  --text-sm-lh: 1.5;
+  --text-base: 13px;
+  --text-base-lh: 1.55;
+  --text-md:   14px;
+  --text-md-lh: 1.5;
+  --text-lg:   16px;
+  --text-lg-lh: 1.4;
+  --text-xl:   18px;
+  --text-xl-lh: 1.35;
+
+  /* Density: monospaced text in terminals/code wants tighter leading. */
+  --lh-mono: 1.5;
+  --lh-tight: 1.3;
+
+  /* ── Spacing (4px grid) ─────────────────────────────────── */
+  --space-0: 0;
+  --space-1: 2px;
+  --space-2: 4px;
+  --space-3: 6px;
+  --space-4: 8px;
+  --space-5: 10px;
+  --space-6: 12px;
+  --space-7: 14px;
+  --space-8: 16px;
+  --space-10: 20px;
+  --space-12: 24px;
+  --space-14: 28px;
+  --space-16: 32px;
+  --space-20: 40px;
+
+  /* ── Radii ──────────────────────────────────────────────── */
+  --radius-none: 0;
+  --radius-sm: 3px;
+  --radius-md: 4px;
+  --radius-lg: 6px;
+  --radius-xl: 8px;
+  --radius-2xl: 12px;
+  --radius-pill: 999px;
+  --radius-circle: 50%;
+
+  /* ── Borders ────────────────────────────────────────────── */
+  --border-width: 1px;
+  --border-width-strong: 2px;
+
+  /* ── Motion ─────────────────────────────────────────────── */
+  --dur-instant: 80ms;
+  --dur-fast:   120ms;
+  --dur-base:   160ms;
+  --dur-slow:   220ms;
+  --dur-slower: 320ms;
+
+  --ease-out: cubic-bezier(0.22, 0.61, 0.36, 1);    /* approachable */
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);    /* balanced */
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1); /* tiny overshoot */
+
+  /* ── Z-index layers ─────────────────────────────────────── */
+  --z-base: 0;
+  --z-sticky: 10;
+  --z-dropdown: 50;
+  --z-overlay: 100;
+  --z-popover: 500;
+  --z-modal: 1000;
+  --z-toast: 1100;
+  --z-tooltip: 1200;
+  --z-quick-open: 2000;
+  --z-theme-picker: 3000;
+
+  /* ── Focus ring outline width ───────────────────────────── */
+  --ring-width: 2px;
+  --ring-offset: 2px;
+
+  /* ── Built-in fallbacks (overridden by applyThemeToDom). ─
+   * Keep these in sync with the Void theme so SSR/cold-load doesn't flash
+   * default-browser styles before the theme finishes booting.
+   */
+  --bg: #0a0b0e;
+  --bg-panel: #0e0f12;
+  --bg-raised: #14161b;
+  --bg-overlay: rgba(10, 11, 14, 0.7);
+  --fg: #d6d8dd;
+  --fg-muted: #8a8f99;
+  --fg-subtle: #6b7280;
+  --border: #1f2229;
+  --border-strong: #2a2d34;
+  --accent: #5d7ff5;
+  --accent-fg: #0a0b0e;
+  --accent-soft: rgba(93, 127, 245, 0.16);
+  --accent-strong: rgba(93, 127, 245, 0.55);
+  --danger: #ef4444;
+  --danger-soft: rgba(239, 68, 68, 0.16);
+  --success: #22c55e;
+  --success-soft: rgba(34, 197, 94, 0.16);
+  --warn: #f59e0b;
+  --warn-soft: rgba(245, 158, 11, 0.16);
+  --info: #38bdf8;
+  --info-soft: rgba(56, 189, 248, 0.16);
+  --selection: #2f4f76;
+
+  /* Surfaces derived from the theme — set in applyThemeToDom too. */
+  --hover: rgba(255, 255, 255, 0.04);
+  --hover-strong: rgba(255, 255, 255, 0.07);
+  --active: rgba(255, 255, 255, 0.10);
+  --scrollbar-thumb: rgba(255, 255, 255, 0.10);
+  --scrollbar-thumb-hover: rgba(255, 255, 255, 0.18);
+
+  /* Elevation — softer shadows for modern, calm UI. */
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.30);
+  --shadow-2: 0 4px 10px rgba(0, 0, 0, 0.35);
+  --shadow-3: 0 12px 28px rgba(0, 0, 0, 0.45);
+  --shadow-4: 0 24px 48px rgba(0, 0, 0, 0.55);
+
+  /* Focus ring colour comes from accent at ~45% alpha. Computed in JS. */
+  --ring: rgba(93, 127, 245, 0.45);
+}
+
+/* Light themes get gentler default elevations and brighter hover surfaces.
+ * applyThemeToDom() sets data-theme-kind on <html>. */
+:root[data-theme-kind="light"] {
+  --hover: rgba(0, 0, 0, 0.04);
+  --hover-strong: rgba(0, 0, 0, 0.07);
+  --active: rgba(0, 0, 0, 0.10);
+  --scrollbar-thumb: rgba(0, 0, 0, 0.18);
+  --scrollbar-thumb-hover: rgba(0, 0, 0, 0.28);
+
+  --bg-overlay: rgba(255, 255, 255, 0.55);
+
+  --shadow-1: 0 1px 2px rgba(15, 23, 42, 0.10);
+  --shadow-2: 0 4px 10px rgba(15, 23, 42, 0.12);
+  --shadow-3: 0 12px 28px rgba(15, 23, 42, 0.18);
+  --shadow-4: 0 24px 48px rgba(15, 23, 42, 0.22);
+}
