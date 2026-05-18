@@ -17,6 +17,8 @@ import { AgentConfigPanel } from "./components/AgentConfigPanel";
 import { SshPresetsPanel } from "./components/SshPresetsPanel";
 import { ArchitectPanel } from "./components/ArchitectPanel";
 import { HotkeyBindings } from "./components/HotkeyBindings";
+import { TasksPanel } from "./components/TasksPanel";
+import { TransmissionLog } from "./components/TransmissionLog";
 import { useStore } from "./state/store";
 import { useThemeBootstrap } from "./themes/useTheme";
 import {
@@ -265,85 +267,91 @@ type RightTab =
 function RightPane() {
   const [tab, setTab] = useState<RightTab>("chat");
   return (
-    <div className="right-pane">
-      <div className="right-pane-tabs">
-        <button
-          className={`right-pane-tab ${tab === "chat" ? "active" : ""}`}
-          onClick={() => setTab("chat")}
-        >
-          Chat
-        </button>
-        <button
-          className={`right-pane-tab ${tab === "architect" ? "active" : ""}`}
-          onClick={() => setTab("architect")}
-          title="Always-On Architect"
-        >
-          Architect
-        </button>
-        <button
-          className={`right-pane-tab ${tab === "memory" ? "active" : ""}`}
-          onClick={() => setTab("memory")}
-        >
-          Memory
-        </button>
-        <button
-          className={`right-pane-tab ${tab === "skills" ? "active" : ""}`}
-          onClick={() => setTab("skills")}
-          title="Architect prompt-skills"
-        >
-          Skills
-        </button>
-        <button
-          className={`right-pane-tab ${tab === "voice" ? "active" : ""}`}
-          onClick={() => setTab("voice")}
-        >
-          Voice
-        </button>
-        <button
-          className={`right-pane-tab ${tab === "browser" ? "active" : ""}`}
-          onClick={() => setTab("browser")}
-        >
-          Web
-        </button>
-        <button
-          className={`right-pane-tab ${tab === "files" ? "active" : ""}`}
-          onClick={() => setTab("files")}
-        >
-          Files
-        </button>
-        <button
-          className={`right-pane-tab ${tab === "prompts" ? "active" : ""}`}
-          onClick={() => setTab("prompts")}
-        >
-          Prompts
-        </button>
-        <button
-          className={`right-pane-tab ${tab === "agents" ? "active" : ""}`}
-          onClick={() => setTab("agents")}
-          title="Per-role system prompt overrides"
-        >
-          Agents
-        </button>
-        <button
-          className={`right-pane-tab ${tab === "ssh" ? "active" : ""}`}
-          onClick={() => setTab("ssh")}
-          title="SSH connection presets"
-        >
-          SSH
-        </button>
+    <div className="right-pane-bridge">
+      <div className="right-pane-bridge__bottom">
+        <TasksPanel />
+        <div className="right-pane" style={{ borderLeft: "none" }}>
+          <div className="right-pane-tabs">
+            <button
+              className={`right-pane-tab ${tab === "chat" ? "active" : ""}`}
+              onClick={() => setTab("chat")}
+            >
+              Chat
+            </button>
+            <button
+              className={`right-pane-tab ${tab === "architect" ? "active" : ""}`}
+              onClick={() => setTab("architect")}
+              title="Always-On Architect"
+            >
+              Architect
+            </button>
+            <button
+              className={`right-pane-tab ${tab === "memory" ? "active" : ""}`}
+              onClick={() => setTab("memory")}
+            >
+              Memory
+            </button>
+            <button
+              className={`right-pane-tab ${tab === "skills" ? "active" : ""}`}
+              onClick={() => setTab("skills")}
+              title="Architect prompt-skills"
+            >
+              Skills
+            </button>
+            <button
+              className={`right-pane-tab ${tab === "voice" ? "active" : ""}`}
+              onClick={() => setTab("voice")}
+            >
+              Voice
+            </button>
+            <button
+              className={`right-pane-tab ${tab === "browser" ? "active" : ""}`}
+              onClick={() => setTab("browser")}
+            >
+              Web
+            </button>
+            <button
+              className={`right-pane-tab ${tab === "files" ? "active" : ""}`}
+              onClick={() => setTab("files")}
+            >
+              Files
+            </button>
+            <button
+              className={`right-pane-tab ${tab === "prompts" ? "active" : ""}`}
+              onClick={() => setTab("prompts")}
+            >
+              Prompts
+            </button>
+            <button
+              className={`right-pane-tab ${tab === "agents" ? "active" : ""}`}
+              onClick={() => setTab("agents")}
+              title="Per-role system prompt overrides"
+            >
+              Agents
+            </button>
+            <button
+              className={`right-pane-tab ${tab === "ssh" ? "active" : ""}`}
+              onClick={() => setTab("ssh")}
+              title="SSH connection presets"
+            >
+              SSH
+            </button>
+          </div>
+          <div className="right-pane-body">
+            {tab === "chat" ? <OrchestratorPanel /> : null}
+            {tab === "architect" ? <ArchitectPanel /> : null}
+            {tab === "memory" ? <MemoryPanel /> : null}
+            {tab === "skills" ? <SkillsPanel /> : null}
+            {tab === "voice" ? <VoicePanel /> : null}
+            {tab === "browser" ? <BrowserPanel /> : null}
+            {tab === "files" ? <FilesPanel /> : null}
+            {tab === "prompts" ? <PromptsPanel /> : null}
+            {tab === "agents" ? <AgentConfigPanel /> : null}
+            {tab === "ssh" ? <SshPresetsPanel /> : null}
+          </div>
+        </div>
       </div>
-      <div className="right-pane-body">
-        {tab === "chat" ? <OrchestratorPanel /> : null}
-        {tab === "architect" ? <ArchitectPanel /> : null}
-        {tab === "memory" ? <MemoryPanel /> : null}
-        {tab === "skills" ? <SkillsPanel /> : null}
-        {tab === "voice" ? <VoicePanel /> : null}
-        {tab === "browser" ? <BrowserPanel /> : null}
-        {tab === "files" ? <FilesPanel /> : null}
-        {tab === "prompts" ? <PromptsPanel /> : null}
-        {tab === "agents" ? <AgentConfigPanel /> : null}
-        {tab === "ssh" ? <SshPresetsPanel /> : null}
-      </div>
+      <TransmissionLog />
     </div>
   );
 }

@@ -407,6 +407,20 @@ const ROSE_PINE_DAWN = t("rose-pine-dawn", "Rosé Pine Dawn", "light", {
   blue: "#56949f", magenta: "#907aa9", cyan: "#d7827e", white: "#575279",
 });
 
+const BRIDGEMIND = t("bridgemind", "Bridgemind", "dark", {
+  bg: "#121212", bgPanel: "#161616", bgRaised: "#1E1E1E",
+  fg: "#E0E0E0", fgMuted: "#8A8A8A",
+  border: "#2A2A2A", borderStrong: "#3A3A3A",
+  accent: "#E89A4A", accentFg: "#121212",
+  danger: "#EF4444", success: "#4ADE80", warn: "#E89A4A", info: "#60A5FA",
+  selection: "#1E3A5F",
+}, {
+  background: "#121212", foreground: "#E0E0E0",
+  cursor: "#E89A4A", selectionBackground: "#1E3A5F",
+  black: "#161616", red: "#EF4444", green: "#4ADE80", yellow: "#E89A4A",
+  blue: "#60A5FA", magenta: "#C084FC", cyan: "#22D3EE", white: "#E0E0E0",
+});
+
 const HIGH_CONTRAST = t("high-contrast", "High Contrast", "dark", {
   bg: "#000000", bgPanel: "#000000", bgRaised: "#0d0d0d",
   fg: "#ffffff", fgMuted: "#cccccc",
@@ -443,6 +457,7 @@ export const THEMES: Theme[] = [
   HORIZON,
   MATERIAL_DEEP,
   HACKER,
+  BRIDGEMIND,
   PAPER,
   SOLARIZED_LIGHT,
   GITHUB_LIGHT,
@@ -451,7 +466,7 @@ export const THEMES: Theme[] = [
   HIGH_CONTRAST,
 ];
 
-export const DEFAULT_THEME_ID = VOID.id;
+export const DEFAULT_THEME_ID = BRIDGEMIND.id;
 
 export function getTheme(id: string | null | undefined): Theme {
   if (!id) return VOID;

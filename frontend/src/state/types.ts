@@ -54,12 +54,35 @@ export interface QueueItem {
   status: QueueStatus | string;
   position: number;
   created_at: string;
+  /// `@`-mention attachments validated by the backend (Architect chat).
+  /// Empty when the message had no attachments.
+  attachments?: PathAttachment[];
 }
 
 export interface QueueSnapshot {
   session_id: string;
   items: QueueItem[];
   pending: number;
+}
+
+// ---------- @-mention path attachments ----------
+
+export type PathAttachmentKind = "file" | "dir";
+
+/// Validated path attachment, mirrored from `crate::path_suggest::Attachment`.
+/// `path` is always absolute + canonicalised by the backend; `label` is the
+/// workspace-relative or `~`-collapsed display form.
+export interface PathAttachment {
+  kind: PathAttachmentKind;
+  path: string;
+  label: string;
+}
+
+/// Live suggestion row, mirrored from `crate::path_suggest::Suggestion`.
+export interface PathSuggestion {
+  kind: PathAttachmentKind;
+  path: string;
+  label: string;
 }
 
 export type TaskStatus =

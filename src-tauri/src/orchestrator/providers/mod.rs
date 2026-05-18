@@ -109,7 +109,7 @@ pub fn resolve_anthropic_key(db: &DbPool) -> Option<String> {
         .filter(|s| !s.trim().is_empty())
 }
 
-/// Build the active provider. Hardcoded to OmniRouter with kr/claude-opus-4.7.
+/// Build the active provider. Hardcoded to OmniRouter with kr/claude-opus-4.6.
 pub fn build_provider(_db: &DbPool) -> Arc<dyn LlmProvider> {
     Arc::new(omni::OmniProvider::new(
         DEFAULT_OMNI_BASE.to_string(),

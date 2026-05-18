@@ -17,6 +17,8 @@ import { Maximize2, Minimize2, X, RowsIcon, ColumnsIcon } from "./icons";
 import { useTheme } from "../themes/useTheme";
 import { CommandBlockParser, type CommandBlock } from "./cmdblock/parser";
 import { CommandBlocksBar } from "./cmdblock/CommandBlocksBar";
+import { useAgentSummary } from "../hooks/useAgentSummary";
+import type { Task, TaskStatus } from "../state/types";
 
 interface Props {
   agent: Agent;
@@ -398,7 +400,11 @@ export function AgentTile({ agent, isFocused, isMaximized }: Props) {
       <div className="agent-tile-header">
         <span className="badge">{agent.agent_type}</span>
         <ArchitectBadge agentId={agent.id} />
-        <span className="title">{shortId(agent.id)}</span>
+        <AgentTitle agentId={agent.id} />
+        <AgentIdChip id={agent.id} onCopy={(text) => {
+          navigator.clipboard.writeText(text).catch(() => undefined);
+          pushToast({ text: `Copied ${shortId(text)}`, kind: "info" });
+        }} />
         <button title="Split horizontally" onClick={() => split("h")}>
           <RowsIcon size={12} />
         </button>
@@ -474,6 +480,61 @@ export function AgentTile({ agent, isFocused, isMaximized }: Props) {
 
 function shortId(id: string): string {
   return id.slice(0, 8);
+}
+
+const TASK_PRIORITY: Record<TaskStatus, number> = {
+  in_progress: 0,
+  in_review: 1,
+  todo: 2,
+  complete: 3,
+  cancelled: 4,
+};
+
+function pickActiveTask(tasks: Record<string, Task>, agentId: string): Task | null {
+  let best: Task | null = null;
+  for (const t of Object.values(tasks)) {
+    if (t.agent_id !== agentId) continue;
+    if (!best) {
+      best = t;
+      continue;
+    }
+    const a = TASK_PRIORITY[t.status] ?? 9;
+    const b = TASK_PRIORITY[best.status] ?? 9;
+    if (a < b || (a === b && t.updated_at > best.updated_at)) best = t;
+  }
+  return best;
+}
+
+function AgentTitle({ agentId }: { agentId: string }) {
+  const tasks = useStore((s) => s.tasks);
+  const task = pickActiveTask(tasks, agentId);
+  const summary = useAgentSummary(agentId, task?.title ?? null);
+  return (
+    <span className="title" title={summary}>
+      {summary}
+    </span>
+  );
+}
+
+function AgentIdChip({
+  id,
+  onCopy,
+}: {
+  id: string;
+  onCopy: (id: string) => void;
+}) {
+  return (
+    <span
+      className="agent-id-chip"
+      title={`${id} — click to copy`}
+      onClick={(e) => {
+        e.stopPropagation();
+        onCopy(id);
+      }}
+    >
+      {shortId(id)}
+    </span>
+  );
 }
 
 function ArchitectBadge({ agentId }: { agentId: string }) {

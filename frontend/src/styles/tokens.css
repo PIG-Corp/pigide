@@ -107,28 +107,28 @@
    * Keep these in sync with the Void theme so SSR/cold-load doesn't flash
    * default-browser styles before the theme finishes booting.
    */
-  --bg: #0a0b0e;
-  --bg-panel: #0e0f12;
-  --bg-raised: #14161b;
-  --bg-overlay: rgba(10, 11, 14, 0.7);
-  --fg: #d6d8dd;
-  --fg-muted: #8a8f99;
-  --fg-subtle: #6b7280;
-  --border: #1f2229;
-  --border-strong: #2a2d34;
-  --accent: #5d7ff5;
-  --accent-fg: #0a0b0e;
-  --accent-soft: rgba(93, 127, 245, 0.16);
-  --accent-strong: rgba(93, 127, 245, 0.55);
-  --danger: #ef4444;
+  --bg: #121212;
+  --bg-panel: #161616;
+  --bg-raised: #1E1E1E;
+  --bg-overlay: rgba(18, 18, 18, 0.7);
+  --fg: #E0E0E0;
+  --fg-muted: #8A8A8A;
+  --fg-subtle: #5A5A5A;
+  --border: #2A2A2A;
+  --border-strong: #3A3A3A;
+  --accent: #E89A4A;
+  --accent-fg: #121212;
+  --accent-soft: rgba(232, 154, 74, 0.16);
+  --accent-strong: rgba(232, 154, 74, 0.55);
+  --danger: #EF4444;
   --danger-soft: rgba(239, 68, 68, 0.16);
-  --success: #22c55e;
-  --success-soft: rgba(34, 197, 94, 0.16);
-  --warn: #f59e0b;
-  --warn-soft: rgba(245, 158, 11, 0.16);
-  --info: #38bdf8;
-  --info-soft: rgba(56, 189, 248, 0.16);
-  --selection: #2f4f76;
+  --success: #4ADE80;
+  --success-soft: rgba(74, 222, 128, 0.16);
+  --warn: #E89A4A;
+  --warn-soft: rgba(232, 154, 74, 0.16);
+  --info: #60A5FA;
+  --info-soft: rgba(96, 165, 250, 0.16);
+  --selection: #1E3A5F;
 
   /* Surfaces derived from the theme — set in applyThemeToDom too. */
   --hover: rgba(255, 255, 255, 0.04);
@@ -144,7 +144,7 @@
   --shadow-4: 0 24px 48px rgba(0, 0, 0, 0.55);
 
   /* Focus ring colour comes from accent at ~45% alpha. Computed in JS. */
-  --ring: rgba(93, 127, 245, 0.45);
+  --ring: rgba(232, 154, 74, 0.45);
 }
 
 /* Light themes get gentler default elevations and brighter hover surfaces.

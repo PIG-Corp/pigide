@@ -1,0 +1,9 @@
+# Cargo build env — applies to every `cargo` / `cargo tauri build` invocation.
+#
+# NO_STRIP=1 — Tauri's AppImage step uses linuxdeploy, which bundles its own
+# strip(1) too old to understand DT_RELR (.relr.dyn) sections in modern
+# system libs (glibc 2.36+). Without this it fails: "unknown type [0x13]
+# section .relr.dyn". Setting NO_STRIP=1 makes linuxdeploy skip stripping —
+# binaries are already trimmed by the release profile anyway.
+[env]
+NO_STRIP = "1"

@@ -84,11 +84,15 @@ policy).
 ## Watcher (опционально)
 
 Watcher — фоновый супервизор, который слушает stdout каждого спавненного
-агента, классифицирует чанки через Google Gemini AI Studio
-(`gemma-3-4b-it`) и эскалирует «вопросы к человеку» Architect'у в почтовый
-ящик `role:coordinator`, на тред `watcher:<agent_id>`. Ответ Architect'а
-автоматически инжектится обратно в stdin исходного агента — агент не
-зависает на интерактивном prompt'е, пока вы не подойдёте.
+агента, классифицирует чанки через Google AI Studio Generative Language
+API (по умолчанию `gemini-2.5-flash-lite` — Gemma 3 4B IT из изначального
+брифа AI Studio v1beta больше не отдаёт; live-проверка показала, что
+Gemma 4 31B уходит в reasoning-prose вместо строгого JSON, а Flash-Lite
+обеспечивает strict-JSON и стоит в ~10× меньше) и эскалирует «вопросы к
+человеку» Architect'у в почтовый ящик `role:coordinator`, на тред
+`watcher:<agent_id>`. Ответ Architect'а автоматически инжектится обратно
+в stdin исходного агента — агент не зависает на интерактивном prompt'е,
+пока вы не подойдёте.
 
 ### Включить
 
@@ -110,6 +114,7 @@ GEMINI_API_KEY=AIzaSy... cargo tauri dev --features watcher
 |-|-|-|
 | `GEMINI_API_KEY` | — (обязательна) | Ключ Google AI Studio. Уходит только в заголовке `x-goog-api-key`, не в URL и не в логи. |
 | `PIGIDE_WATCHER_RPM` | `10` | Per-agent rate-limit (запросов в минуту). Token-bucket: при переполнении чанк дропается, не ставится в очередь. |
+| `PIGIDE_WATCHER_MODEL` | `gemini-2.5-flash-lite` | Имя модели Generative Language API. Меняй, если у твоего ключа доступна другая Gemma/Gemini-Flash-Lite. Парсер устойчив к prose-обрамлению, поэтому Gemma-семейство тоже сработает (но с худшей точностью на реальных reasoning-моделях). |
 
 ### MCP-инструмент
 
@@ -125,10 +130,13 @@ calls_this_minute, blocked_until, dropped} }}` — удобно для дашб�
 
 ### Стоимость
 
-`gemma-3-4b-it` на AI Studio сейчас бесплатен в free-tier (15 RPM на проект,
-с лимитом по тонам в день). Дефолт `PIGIDE_WATCHER_RPM=10` подобран так,
-чтобы один агент не мог в одиночку выйти за per-project free-tier; если у
-вас десяток активных агентов — учитывайте, что лимит делится между ними.
+`gemini-2.5-flash-lite` доступен в free-tier AI Studio с per-project
+лимитом порядка 30 RPM на ключ (на момент написания). Дефолт
+`PIGIDE_WATCHER_RPM=10` подобран так, чтобы один агент не выедал лимит
+ключа в одиночку; если у вас десяток активных агентов — учитывайте, что
+лимит делится между ними. На paid-тарифах Flash-Lite — самая дешёвая
+модель Gemini API, ~$0.075 за 1M входных токенов и $0.30 за 1M выходных
+(текст).
 
 ## PigVoice — instant voice-to-text
 
@@ -236,6 +244,17 @@ the meta-skill the Architect invokes whenever it's about to dispatch to a
 sub-agent. The Skills panel (right pane → Skills) lists everything,
 toggles enable/disable, shows the last turn's selection trace, and lets
 you stub a new user skill from the UI.
+
+The Architect prompt itself
+(`src-tauri/src/orchestrator/prompt.rs`, v2 — gold-standard
+meta-prompting; v1 archived alongside as `prompt.v1.rs`) drives every
+turn through a deterministic 8-step pipeline: **intent → contract**
+(role / goal / exit_criteria) → **skill selection** → **memory
+grounding** → **decomposition** (Plan-and-Solve / Least-to-Most) →
+**draft** (via `[[user-skill-prompt-engineer]]`) → **self-critique**
+(Self-Refine + Chain-of-Verification) → **dispatch** (parallel where
+independent) → **observe + self-improve** (`create_memory` for new
+patterns). Research citations are at the top of `prompt.rs`.
 
 See [`docs/skills.md`](docs/skills.md) for the author guide and
 [`SKILLS_DESIGN.md`](SKILLS_DESIGN.md) for the design.

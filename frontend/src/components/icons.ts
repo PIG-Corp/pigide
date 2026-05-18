@@ -10,6 +10,7 @@ export {
   Rows2 as RowsIcon,
   Columns2 as ColumnsIcon,
   Send,
+  Square,
   Folder,
   ChevronRight,
   Settings,

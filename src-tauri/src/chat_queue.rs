@@ -13,6 +13,7 @@
 use crate::db::DbPool;
 use crate::error::{Error, Result};
 use crate::events::EV_CHAT_QUEUE;
+use crate::path_suggest::Attachment;
 use chrono::Utc;
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
@@ -60,6 +61,11 @@ pub struct QueueItem {
     pub status: String, // serialise as string for the frontend
     pub position: i64,
     pub created_at: String,
+    /// Validated `@`-mention attachments for this message. Empty vec when
+    /// the user sent a plain text message. Surfaces in the orchestrator's
+    /// `[WORLD STATE]` block for the turn that consumes this row.
+    #[serde(default)]
+    pub attachments: Vec<Attachment>,
 }
 
 /// Idempotent table creation. Called from `db::init_pool` migrations, but
@@ -74,13 +80,20 @@ pub fn ensure_table(db: &DbPool) -> Result<()> {
             text        TEXT NOT NULL,
             status      TEXT NOT NULL DEFAULT 'queued',
             position    INTEGER NOT NULL,
-            created_at  TEXT NOT NULL
+            created_at  TEXT NOT NULL,
+            attachments_json TEXT
          );
          CREATE INDEX IF NOT EXISTS idx_chat_queue_session_pos
             ON chat_queue(session_id, position);
          CREATE INDEX IF NOT EXISTS idx_chat_queue_status
             ON chat_queue(status);",
     )?;
+    // Defence-in-depth: if the table existed before v13, ALTER it now.
+    // SQLite is happy to no-op an "already exists" column add; we ignore
+    // the error so this stays idempotent.
+    let _ = conn.execute_batch(
+        "ALTER TABLE chat_queue ADD COLUMN attachments_json TEXT",
+    );
     Ok(())
 }
 
@@ -104,6 +117,18 @@ pub fn recover_inflight(db: &DbPool) -> Result<usize> {
 /// the still-pending tail are also rejected — guards against double-tap on
 /// Enter or stray accessibility events that would otherwise spam the model.
 pub fn enqueue(db: &DbPool, session_id: &str, text: &str) -> Result<QueueItem> {
+    enqueue_with_attachments(db, session_id, text, Vec::new())
+}
+
+/// Append a new user message with validated attachments. Same dedupe /
+/// empty-text rules as [`enqueue`]. The attachments are persisted as JSON
+/// in `chat_queue.attachments_json` and replayed by the worker.
+pub fn enqueue_with_attachments(
+    db: &DbPool,
+    session_id: &str,
+    text: &str,
+    attachments: Vec<Attachment>,
+) -> Result<QueueItem> {
     let trimmed = text.trim();
     if trimmed.is_empty() {
         return Err(Error::Invalid("empty message".into()));
@@ -132,6 +157,11 @@ pub fn enqueue(db: &DbPool, session_id: &str, text: &str) -> Result<QueueItem> {
             |r| r.get(0),
         )
         .unwrap_or(1);
+    let attachments_json: Option<String> = if attachments.is_empty() {
+        None
+    } else {
+        Some(serde_json::to_string(&attachments)?)
+    };
     let item = QueueItem {
         id: Uuid::new_v4().to_string(),
         session_id: session_id.to_string(),
@@ -139,10 +169,11 @@ pub fn enqueue(db: &DbPool, session_id: &str, text: &str) -> Result<QueueItem> {
         status: QueueStatus::Queued.as_str().into(),
         position: next_pos,
         created_at: Utc::now().to_rfc3339(),
+        attachments,
     };
     conn.execute(
-        "INSERT INTO chat_queue(id,session_id,text,status,position,created_at)
-         VALUES(?1,?2,?3,?4,?5,?6)",
+        "INSERT INTO chat_queue(id,session_id,text,status,position,created_at,attachments_json)
+         VALUES(?1,?2,?3,?4,?5,?6,?7)",
         params![
             &item.id,
             &item.session_id,
@@ -150,6 +181,7 @@ pub fn enqueue(db: &DbPool, session_id: &str, text: &str) -> Result<QueueItem> {
             &item.status,
             item.position,
             &item.created_at,
+            &attachments_json,
         ],
     )?;
     Ok(item)
@@ -166,12 +198,16 @@ pub fn claim_next(db: &DbPool, session_id: &str) -> Result<Option<QueueItem>> {
     let tx = conn.transaction()?;
     let row: Option<QueueItem> = tx
         .query_row(
-            "SELECT id,session_id,text,status,position,created_at
+            "SELECT id,session_id,text,status,position,created_at,attachments_json
              FROM chat_queue
              WHERE session_id=?1 AND status='queued'
              ORDER BY position ASC LIMIT 1",
             [session_id],
             |r| {
+                let attachments_json: Option<String> = r.get(6)?;
+                let attachments = attachments_json
+                    .and_then(|s| serde_json::from_str::<Vec<Attachment>>(&s).ok())
+                    .unwrap_or_default();
                 Ok(QueueItem {
                     id: r.get(0)?,
                     session_id: r.get(1)?,
@@ -179,6 +215,7 @@ pub fn claim_next(db: &DbPool, session_id: &str) -> Result<Option<QueueItem>> {
                     status: r.get(3)?,
                     position: r.get(4)?,
                     created_at: r.get(5)?,
+                    attachments,
                 })
             },
         )
@@ -233,12 +270,16 @@ pub fn mark_failed(db: &DbPool, id: &str) -> Result<()> {
 pub fn list(db: &DbPool, session_id: &str) -> Result<Vec<QueueItem>> {
     let conn = db.get()?;
     let mut stmt = conn.prepare(
-        "SELECT id,session_id,text,status,position,created_at
+        "SELECT id,session_id,text,status,position,created_at,attachments_json
          FROM chat_queue
          WHERE session_id=?1 AND status IN ('queued','processing')
          ORDER BY position ASC",
     )?;
     let rows = stmt.query_map([session_id], |r| {
+        let attachments_json: Option<String> = r.get(6)?;
+        let attachments = attachments_json
+            .and_then(|s| serde_json::from_str::<Vec<Attachment>>(&s).ok())
+            .unwrap_or_default();
         Ok(QueueItem {
             id: r.get(0)?,
             session_id: r.get(1)?,
@@ -246,6 +287,7 @@ pub fn list(db: &DbPool, session_id: &str) -> Result<Vec<QueueItem>> {
             status: r.get(3)?,
             position: r.get(4)?,
             created_at: r.get(5)?,
+            attachments,
         })
     })?;
     let mut out = Vec::new();
@@ -425,6 +467,44 @@ mod tests {
         assert_eq!(head1.text, "a");
         // s2 untouched.
         assert_eq!(pending_count(&p, "s2").unwrap(), 1);
+    }
+
+    #[test]
+    fn enqueue_with_attachments_round_trips_via_claim_next() {
+        let p = test_pool();
+        let attachments = vec![Attachment {
+            kind: "file".into(),
+            path: "/abs/main.rs".into(),
+            label: "src/main.rs".into(),
+        }];
+        enqueue_with_attachments(&p, "s", "look at this", attachments.clone()).unwrap();
+        let head = claim_next(&p, "s").unwrap().unwrap();
+        assert_eq!(head.attachments, attachments);
+    }
+
+    #[test]
+    fn list_returns_attachments_for_pending_rows() {
+        let p = test_pool();
+        let a = vec![Attachment {
+            kind: "dir".into(),
+            path: "/abs/dir".into(),
+            label: "dir/".into(),
+        }];
+        enqueue_with_attachments(&p, "s", "msg", a.clone()).unwrap();
+        let items = list(&p, "s").unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].attachments, a);
+    }
+
+    #[test]
+    fn enqueue_without_attachments_persists_null_column() {
+        // Backwards-compat: rows that came from before v13 had NULL
+        // attachments_json. Re-load must surface them as `vec![]` rather
+        // than failing.
+        let p = test_pool();
+        enqueue(&p, "s", "plain").unwrap();
+        let items = list(&p, "s").unwrap();
+        assert!(items[0].attachments.is_empty());
     }
 
     /// Drain simulator — mirrors what `ChatQueueWorker::drain_once` does,

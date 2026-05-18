@@ -47,30 +47,57 @@ impl ClassifierKind {
     }
 }
 
-/// System prompt sent to Gemini before every chunk. Kept minimal — Gemma
-/// follows JSON-shape instructions much better when they fit on a screen.
-pub const SYSTEM_PROMPT: &str = "\
+/// User-turn prompt sent to Gemma. Gemma 4 IT does NOT honour the Gemini
+/// `system_instruction` field cleanly and will 500 on
+/// `responseMimeType: application/json`, so the classifier instead inlines
+/// the contract into a single user turn and post-processes the reply with
+/// [`extract_first_json_object`].
+pub const PROMPT_PREFIX: &str = "\
 You classify a single chunk of stdout from an autonomous CLI coding agent. \
 Decide whether the agent is asking a human for a decision (yes/no, pick an \
 option, supply a value) or just printing progress / errors / noise.
 
-Respond with STRICT JSON, no markdown fences, no commentary. Schema:
-{\"kind\": \"decision_request\"|\"noise\", \"prompt_text\": string|null, \
-\"options\": [string]}
+Return a single JSON object on one line and nothing else. No prose, no \
+markdown fences, no analysis. Schema:
+{\"kind\":\"decision_request\"|\"noise\",\"prompt_text\":string|null,\"options\":[string]}
 
 Rules:
 - \"decision_request\" only when the very last visible line is a prompt the \
-  agent is BLOCKED on (e.g. '(y/N)', numbered choice, '> ', 'Enter password').
-- Plain progress (\"compiling…\", \"running tests\"), errors without a \
-  prompt, ANSI repaints, banners → \"noise\".
+  agent is BLOCKED on (e.g. '(y/N)', numbered choice, '> ', 'Enter \
+  password').
+- Plain progress, errors without a prompt, ANSI repaints, banners → \"noise\".
 - prompt_text: the question reduced to one short sentence, or null for noise.
 - options: discrete choices the agent surfaced (in order); [] if free-form \
-  or noise.";
+  or noise.
 
-/// Endpoint for `gemma-3-4b-it`. Overridable via [`GeminiClient::with_endpoint`]
-/// for tests.
-pub const GEMINI_ENDPOINT: &str =
-    "https://generativelanguage.googleapis.com/v1beta/models/gemma-3-4b-it:generateContent";
+Chunk:
+---
+";
+
+/// Suffix appended after the chunk to bias the model toward emitting the
+/// JSON immediately.
+pub const PROMPT_SUFFIX: &str = "\n---\n\nJSON:";
+
+/// Default model.
+///
+/// The original brief named `gemma-3-4b-it`, but Google AI Studio retired
+/// that variant under v1beta. Two replacements were trialled live:
+/// * `gemma-4-31b-it` — accepts the request but Gemma 4 IT narrates its
+///   reasoning and never emits a clean `{...}` block, so the classifier
+///   could not recover a verdict reliably even with a salvage parser.
+/// * `gemini-2.5-flash-lite` — obeys "respond with JSON only" out of the
+///   box, runs on the same v1beta endpoint, and costs roughly 10× less
+///   per token than the Gemma 4 IT family.
+///
+/// Flash-Lite is therefore the default. Override with the
+/// `PIGIDE_WATCHER_MODEL` env var if your project has a Gemma variant
+/// available (e.g. via Vertex AI rather than AI Studio).
+pub const DEFAULT_MODEL: &str = "gemini-2.5-flash-lite";
+
+/// Endpoint template — `{model}` is substituted at call time. Overridable
+/// via [`GeminiClient::with_endpoint`] for tests.
+pub const GEMINI_ENDPOINT_TEMPLATE: &str =
+    "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent";
 
 /// Strip a candidate `?key=...` query param from any string. Used in error
 /// paths so a panic / log call cannot accidentally surface the API key.
@@ -81,21 +108,36 @@ pub fn redact_secret(input: &str, secret: &str) -> String {
     input.replace(secret, "[REDACTED]")
 }
 
-/// Parse Gemini's `candidates[0].content.parts[0].text` payload — which we
-/// asked to be strict JSON — into a [`Classification`].
+/// Parse Gemini's `candidates[0].content.parts[0].text` payload into a
+/// [`Classification`].
 ///
-/// Tolerant to:
-/// * a leading/trailing markdown fence (```json … ```), defensively stripped;
-/// * extra whitespace;
-/// * missing `options` field (treated as empty);
-/// * `prompt_text: ""` (treated as `None`).
+/// Gemma 4 IT models (the current AI-Studio replacement for `gemma-3-4b-it`)
+/// frequently emit reasoning prose around the JSON, even when explicitly
+/// told not to and even with `responseMimeType: application/json`. To stay
+/// robust without yielding accuracy, this parser:
+///
+/// 1. trims a leading/trailing markdown fence (```json … ```);
+/// 2. if direct `serde_json::from_str` fails, scans the text for the first
+///    balanced `{ … }` block at brace depth 0 and tries that;
+/// 3. normalizes `prompt_text: ""` / whitespace-only → `None`.
 ///
 /// Returns `Err` on any other malformed payload — caller treats that as
 /// "drop this chunk, it's noise".
 pub fn parse_classification(raw: &str) -> Result<Classification, String> {
     let cleaned = strip_json_fence(raw.trim());
-    let mut value: Classification = serde_json::from_str(cleaned)
-        .map_err(|e| format!("classifier JSON parse: {}", e))?;
+    let value: Result<Classification, _> = serde_json::from_str(cleaned);
+    let mut value = match value {
+        Ok(v) => v,
+        Err(direct_err) => {
+            // Salvage path: pull the first balanced JSON object out of the
+            // text and try again. Saves us from prose-prefixed Gemma replies.
+            match extract_first_json_object(cleaned) {
+                Some(obj) => serde_json::from_str(&obj)
+                    .map_err(|e| format!("classifier JSON salvage: {}", e))?,
+                None => return Err(format!("classifier JSON parse: {}", direct_err)),
+            }
+        }
+    };
     // Normalize empty strings -> None to keep downstream code simple.
     if let Some(s) = value.prompt_text.as_ref() {
         if s.trim().is_empty() {
@@ -103,6 +145,48 @@ pub fn parse_classification(raw: &str) -> Result<Classification, String> {
         }
     }
     Ok(value)
+}
+
+/// Scan `s` for the first balanced `{ … }` block at brace-depth 0, ignoring
+/// braces inside double-quoted strings (with backslash escapes). Returns the
+/// object as an owned `String` so the caller can pass it to `from_str`.
+fn extract_first_json_object(s: &str) -> Option<String> {
+    let bytes = s.as_bytes();
+    let mut start: Option<usize> = None;
+    let mut depth: i32 = 0;
+    let mut in_str = false;
+    let mut escape = false;
+    for (i, &b) in bytes.iter().enumerate() {
+        if in_str {
+            if escape {
+                escape = false;
+            } else if b == b'\\' {
+                escape = true;
+            } else if b == b'"' {
+                in_str = false;
+            }
+            continue;
+        }
+        match b {
+            b'"' => in_str = true,
+            b'{' => {
+                if depth == 0 {
+                    start = Some(i);
+                }
+                depth += 1;
+            }
+            b'}' => {
+                depth -= 1;
+                if depth == 0 {
+                    if let Some(s0) = start {
+                        return Some(s[s0..=i].to_string());
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 fn strip_json_fence(s: &str) -> &str {
@@ -126,17 +210,28 @@ pub struct GeminiClient {
     http: reqwest::Client,
 }
 
+/// Build the default endpoint for `model` by substituting it into
+/// [`GEMINI_ENDPOINT_TEMPLATE`].
+pub fn endpoint_for(model: &str) -> String {
+    GEMINI_ENDPOINT_TEMPLATE.replace("{model}", model)
+}
+
 impl GeminiClient {
-    /// Build a client from `GEMINI_API_KEY`. Returns `Err` if the env var is
-    /// unset or empty — the supervisor logs a single warning and disables
-    /// itself rather than retrying a broken config.
+    /// Build a client from `GEMINI_API_KEY` (and optionally
+    /// `PIGIDE_WATCHER_MODEL` to override the default model). Returns `Err`
+    /// if the API key is unset or empty — the supervisor logs a single
+    /// warning and disables itself rather than retrying a broken config.
     pub fn from_env() -> Result<Self, String> {
         let key = std::env::var("GEMINI_API_KEY")
             .map_err(|_| "GEMINI_API_KEY not set".to_string())?;
         if key.trim().is_empty() {
             return Err("GEMINI_API_KEY empty".to_string());
         }
-        Ok(Self::new(GEMINI_ENDPOINT.to_string(), key))
+        let model = std::env::var("PIGIDE_WATCHER_MODEL")
+            .ok()
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or_else(|| DEFAULT_MODEL.to_string());
+        Ok(Self::new(endpoint_for(&model), key))
     }
 
     pub fn new(endpoint: String, api_key: String) -> Self {
@@ -159,14 +254,18 @@ impl GeminiClient {
     /// [`parse_classification`].
     pub async fn generate(&self, agent_chunk: &str) -> Result<String, String> {
         // Body shape per https://ai.google.dev/gemini-api/docs/text-generation
-        // Gemma 3 supports system_instruction since GA.
+        // — Gemini 2.x Flash-Lite (the default) supports `responseMimeType:
+        // application/json`. Some Gemma variants do not (they 500 on it),
+        // so we keep the request shape narrow: a single user turn that
+        // inlines the contract, plus `responseMimeType` which Flash-Lite
+        // honours and Gemma simply ignores. The salvage path in
+        // `parse_classification` keeps the parser working even when the
+        // model decides to narrate.
+        let prompt = format!("{}{}{}", PROMPT_PREFIX, agent_chunk, PROMPT_SUFFIX);
         let body = serde_json::json!({
-            "system_instruction": {
-                "parts": [{"text": SYSTEM_PROMPT}]
-            },
             "contents": [{
                 "role": "user",
-                "parts": [{"text": agent_chunk}]
+                "parts": [{"text": prompt}]
             }],
             "generationConfig": {
                 "responseMimeType": "application/json",
@@ -270,6 +369,46 @@ mod tests {
         assert!(parse_classification("").is_err());
         // unknown kind
         assert!(parse_classification(r#"{"kind":"???"}"#).is_err());
+    }
+
+    #[test]
+    fn parse_salvages_json_from_gemma_prose() {
+        // Real Gemma 4 31B IT output — model wraps the JSON in reasoning.
+        // Salvage path must still recover the verdict.
+        let raw = "*   Analysis: this is a yes/no prompt.\n\
+                   *   Classification:\n\n\
+                   {\"kind\":\"decision_request\",\"prompt_text\":\"Continue?\",\"options\":[\"y\",\"N\"]}\n\
+                   *   Done.";
+        let c = parse_classification(raw).unwrap();
+        assert_eq!(c.kind, ClassifierKind::DecisionRequest);
+        assert_eq!(c.prompt_text.as_deref(), Some("Continue?"));
+        assert_eq!(c.options, vec!["y".to_string(), "N".to_string()]);
+    }
+
+    #[test]
+    fn parse_salvages_first_object_only() {
+        // If the prose contains a stray `{}` before the real verdict, we
+        // pick the first balanced object — caller has to write a sane
+        // prompt; we only need this to not panic and to parse a real one.
+        let raw = "intro {\"kind\":\"noise\",\"options\":[]} trailing prose";
+        let c = parse_classification(raw).unwrap();
+        assert_eq!(c.kind, ClassifierKind::Noise);
+    }
+
+    #[test]
+    fn extract_first_json_object_handles_nesting_and_strings() {
+        let s = "x{\"a\":\"}{\",\"b\":{\"c\":1}}y";
+        let got = extract_first_json_object(s).unwrap();
+        // Must consume to the matching outer `}`, not stop at the brace
+        // inside the string.
+        assert_eq!(got, "{\"a\":\"}{\",\"b\":{\"c\":1}}");
+    }
+
+    #[test]
+    fn endpoint_for_substitutes_model() {
+        let url = endpoint_for("gemma-4-31b-it");
+        assert!(url.ends_with("gemma-4-31b-it:generateContent"));
+        assert!(url.contains("/v1beta/models/"));
     }
 
     #[test]

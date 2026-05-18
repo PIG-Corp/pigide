@@ -6,4 +6,7 @@ members = ["src-tauri"]
 opt-level = "s"
 lto = true
 codegen-units = 1
-strip = true
+# strip = true — ОТКЛЮЧЕНО: linuxdeploy падает на уже стриппнутом бинаре,
+# поэтому AppImage не собирается. Бинарь становится ~10 MB больше, зато
+# `cargo tauri build` работает без NO_STRIP=1.
+strip = false

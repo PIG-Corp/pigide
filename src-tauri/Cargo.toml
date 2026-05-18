@@ -64,11 +64,12 @@ tower-http = { version = "0.6", features = ["cors", "trace"] }
 sha2 = "0.10"
 rand = "0.8"
 url = "2"
+dotenvy = "0.15"
 
 [features]
-default = ["custom-protocol"]
+default = ["custom-protocol", "gpu-cuda", "watcher"]
 custom-protocol = ["tauri/custom-protocol"]
-# GPU backends for Whisper. Pick at most one. Default build is CPU-only.
+# GPU backends for Whisper. Pick at most one. Default build is gpu-cuda.
 #   gpu-cuda     — NVIDIA, requires CUDA toolkit (libcublas, libcudart, nvcc)
 #   gpu-vulkan   — cross-vendor, requires Vulkan SDK
 #   gpu-hipblas  — AMD ROCm
@@ -78,8 +79,8 @@ gpu-vulkan = ["whisper-rs/vulkan"]
 gpu-hipblas = ["whisper-rs/hipblas"]
 gpu-metal = ["whisper-rs/metal"]
 # Watcher — Gemini-backed supervisor that classifies agent stdout chunks and
-# escalates decision-requests to the Coordinator mailbox. Off by default (extra
-# build deps + outbound HTTP). Opt in:  cargo build --features watcher
+# escalates decision-requests to the Coordinator mailbox. Enabled by default.
+# Disable explicitly:  cargo build --no-default-features --features custom-protocol
 watcher = []
 
 [dev-dependencies]

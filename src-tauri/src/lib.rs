@@ -15,6 +15,7 @@ pub mod layout;
 pub mod mcp;
 pub mod memory;
 pub mod orchestrator;
+pub mod path_suggest;
 pub mod project_resolver;
 pub mod prompts;
 pub mod rooms;
@@ -43,8 +44,54 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tauri::Manager;
 
+/// Load `.env` from the first existing location. Lines already in the
+/// environment take precedence — this is "fill in the blanks", not "override".
+fn load_dotenv() {
+    let mut candidates: Vec<PathBuf> = Vec::new();
+
+    if let Ok(explicit) = std::env::var("PIGIDE_ENV_FILE") {
+        candidates.push(PathBuf::from(explicit));
+    }
+    if let Ok(cwd) = std::env::current_dir() {
+        candidates.push(cwd.join(".env"));
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            candidates.push(dir.join(".env"));
+            if let Some(parent) = dir.parent() {
+                candidates.push(parent.join(".env"));
+            }
+        }
+    }
+    if let Some(home) = dirs::config_dir() {
+        candidates.push(home.join("pigide").join(".env"));
+    }
+
+    for path in candidates {
+        if path.is_file() {
+            match dotenvy::from_path(&path) {
+                Ok(_) => {
+                    eprintln!("pigide: loaded env from {}", path.display());
+                    return;
+                }
+                Err(e) => {
+                    eprintln!("pigide: failed to read {}: {}", path.display(), e);
+                }
+            }
+        }
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Load .env BEFORE anything else reads env (logging filter, watcher, etc).
+    // Search order, first hit wins:
+    //   1. $PIGIDE_ENV_FILE                       — explicit override
+    //   2. ./.env                                 — current working dir (dev)
+    //   3. <exe_dir>/.env                         — next to the binary (release)
+    //   4. <exe_dir>/../.env                      — bin/ → repo root layout
+    //   5. ~/.config/pigide/.env                  — XDG user config
+    load_dotenv();
     // On Linux/Wayland, webkit2gtk frequently hits "Error 71 (Protocol error)"
     // unless we force the X11 backend (XWayland) and disable accelerated
     // compositing paths that don't survive the Wayland handshake. This must
@@ -353,7 +400,9 @@ pub fn run() {
             commands::restore_session,
             commands::list_chat,
             commands::send_chat,
+            commands::suggest_paths,
             commands::clear_chat,
+            commands::stop_chat,
             commands::list_chat_queue,
             commands::cancel_chat_queue_item,
             commands::chat_queue_set_continue_on_error,

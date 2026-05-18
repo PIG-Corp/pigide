@@ -111,7 +111,11 @@ impl ChatQueueWorker {
             // The queue snapshot now shows item.status='processing'.
             self.emit_snapshot();
 
-            let res = self.orch.clone().run_chat(item.text.clone()).await;
+            let res = self
+                .orch
+                .clone()
+                .run_chat_with_attachments(item.text.clone(), item.attachments.clone())
+                .await;
             match res {
                 Ok(()) => {
                     let _ = chat_queue::mark_done(&self.db, &item.id);

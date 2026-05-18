@@ -44,7 +44,7 @@ pub fn init_pool() -> Result<DbPool> {
 fn migrate_one(conn: &rusqlite::Connection) -> Result<()> {
     let current: i64 =
         conn.query_row("PRAGMA user_version;", [], |r| r.get(0)).unwrap_or(0);
-    let target = 12;
+    let target = 13;
     if current >= target {
         return Ok(());
     }
@@ -435,6 +435,18 @@ fn migrate_one(conn: &rusqlite::Connection) -> Result<()> {
                 ON chat_queue(session_id, position);
              CREATE INDEX IF NOT EXISTS idx_chat_queue_status
                 ON chat_queue(status);
+             COMMIT;",
+        )?;
+    }
+    if current < 13 {
+        // @-mention path attachments (Architect chat). Stored as a
+        // JSON-encoded `Vec<Attachment>` alongside the queued message so
+        // the orchestrator can surface them in `[WORLD STATE]` for the
+        // turn that consumes the row. NULL/missing → no attachments
+        // (backwards-compatible with v12 rows).
+        conn.execute_batch(
+            "BEGIN;
+             ALTER TABLE chat_queue ADD COLUMN attachments_json TEXT;
              COMMIT;",
         )?;
     }

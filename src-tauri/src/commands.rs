@@ -249,6 +249,10 @@ pub async fn list_chat(
 #[derive(Deserialize)]
 pub struct SendChatArgs {
     pub text: String,
+    /// Optional `@`-mention attachments. Empty / missing = no attachments
+    /// (backwards compatible with older frontends).
+    #[serde(default)]
+    pub attachments: Vec<crate::path_suggest::Attachment>,
 }
 
 #[tauri::command]
@@ -258,11 +262,46 @@ pub async fn send_chat(
 ) -> std::result::Result<crate::chat_queue::QueueItem, String> {
     let session_id =
         crate::chat_sessions::ensure_current(&state.db).map_err(|e| e.to_string())?;
-    let item = crate::chat_queue::enqueue(&state.db, &session_id, &args.text)
+    // Validate every attachment against the allow-list BEFORE enqueuing.
+    // Bad paths surface as a user-visible error and the message is NOT
+    // queued — UX expects the user to fix the chip and resend.
+    let ws_mgr = crate::workspace::WorkspaceManager::new(state.db.clone());
+    let validated = crate::path_suggest::validate_all(&ws_mgr, &args.attachments)
         .map_err(|e| e.to_string())?;
+    let item = crate::chat_queue::enqueue_with_attachments(
+        &state.db,
+        &session_id,
+        &args.text,
+        validated,
+    )
+    .map_err(|e| e.to_string())?;
     state.chat_queue.poke();
     state.chat_queue.emit_snapshot();
     Ok(item)
+}
+
+#[derive(Deserialize)]
+pub struct SuggestPathsArgs {
+    pub query: String,
+    #[serde(default)]
+    pub workspace_id: Option<String>,
+}
+
+#[tauri::command]
+pub async fn suggest_paths(
+    state: State<'_, AppState>,
+    args: SuggestPathsArgs,
+) -> std::result::Result<Vec<crate::path_suggest::Suggestion>, String> {
+    let ws_mgr = crate::workspace::WorkspaceManager::new(state.db.clone());
+    crate::path_suggest::suggest(
+        &state.db,
+        &ws_mgr,
+        crate::path_suggest::SuggestArgs {
+            query: args.query,
+            workspace_id: args.workspace_id,
+        },
+    )
+    .map_err(Into::into)
 }
 
 #[tauri::command]
@@ -316,6 +355,17 @@ pub async fn chat_queue_get_continue_on_error(
 pub async fn clear_chat(state: State<'_, AppState>) -> std::result::Result<(), String> {
     let session_id = crate::chat_sessions::ensure_current(&state.db).map_err(|e| e.to_string())?;
     state.orchestrator.clear(&session_id).map_err(Into::into)
+}
+
+/// Cancel the orchestrator's currently-running turn (if any). Idempotent —
+/// returns `false` when nothing was in flight, `true` when a cancel signal
+/// was actually delivered. The orchestrator drops the in-flight LLM
+/// stream, skips any not-yet-started tool_calls of this iteration, writes
+/// a "(остановлено пользователем)" marker into the session, and emits
+/// `chat://status idle` so the UI re-enables input.
+#[tauri::command]
+pub async fn stop_chat(state: State<'_, AppState>) -> std::result::Result<bool, String> {
+    Ok(state.orchestrator.stop())
 }
 
 // ---------- Chat sessions ----------

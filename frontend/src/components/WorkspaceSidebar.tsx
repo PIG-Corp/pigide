@@ -6,6 +6,12 @@ import { ThemePicker } from "./ThemePicker";
 import { NewWorkspaceModal } from "./NewWorkspaceModal";
 import { useTheme } from "../themes/useTheme";
 
+const STATUS_COLORS = ["#4ADE80", "#60A5FA", "#E89A4A", "#EF4444", "#C084FC"];
+
+function getStatusColor(index: number): string {
+  return STATUS_COLORS[index % STATUS_COLORS.length];
+}
+
 export function WorkspaceSidebar() {
   const workspaces = useStore((s) => s.workspaces);
   const currentId = useStore((s) => s.currentId);
@@ -17,6 +23,7 @@ export function WorkspaceSidebar() {
   const newOpen = useStore((s) => s.newWorkspaceModalOpen);
   const setNewOpen = useStore((s) => s.setNewWorkspaceModalOpen);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [tooltip, setTooltip] = useState<{ text: string; x: number; y: number } | null>(null);
   const { theme } = useTheme();
 
   const reload = async () => {
@@ -36,7 +43,6 @@ export function WorkspaceSidebar() {
       setLayout(ws.layout);
       const agents = await ipc.listAgents(id);
       setAgents(agents);
-      // Chat is global — don't reload on workspace switch.
     } catch (err) {
       pushToast({ text: `Switch failed: ${err}`, kind: "error" });
     }
@@ -82,6 +88,13 @@ export function WorkspaceSidebar() {
     }
   };
 
+  const showTooltip = (e: React.MouseEvent, paths: string[] | undefined) => {
+    if (!paths || paths.length === 0) return;
+    setTooltip({ text: paths.join(", "), x: e.clientX + 12, y: e.clientY - 4 });
+  };
+
+  const hideTooltip = () => setTooltip(null);
+
   return (
     <div className="workspace-sidebar">
       <div className="workspace-sidebar-header">
@@ -102,14 +115,20 @@ export function WorkspaceSidebar() {
             <button style={{ marginTop: 10 }} onClick={create}>Create one</button>
           </div>
         ) : null}
-        {workspaces.map((ws) => (
+        {workspaces.map((ws, i) => (
           <div
             key={ws.id}
             className={`workspace-item ${currentId === ws.id ? "active" : ""}`}
             onClick={() => switchTo(ws.id)}
+            onMouseMove={(e) => showTooltip(e, ws.paths)}
+            onMouseLeave={hideTooltip}
           >
+            <span
+              className="ws-status-dot"
+              style={{ background: getStatusColor(i) }}
+            />
             <span className="name">{ws.name}</span>
-            <span className="count">{ws.agent_count}</span>
+            <span className="ws-pill-badge">{ws.agent_count}</span>
             <span className="workspace-actions">
               <button
                 title="Rename"
@@ -133,6 +152,16 @@ export function WorkspaceSidebar() {
           </div>
         ))}
       </div>
+
+      {tooltip && (
+        <div
+          className="ws-tooltip"
+          style={{ left: tooltip.x, top: tooltip.y }}
+        >
+          {tooltip.text}
+        </div>
+      )}
+
       {pickerOpen && <ThemePicker onClose={() => setPickerOpen(false)} />}
       {newOpen && (
         <NewWorkspaceModal

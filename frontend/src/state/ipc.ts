@@ -10,6 +10,8 @@ import type {
   LayoutNode,
   Note,
   NoteSummary,
+  PathAttachment,
+  PathSuggestion,
   Prompt,
   QueueItem,
   QueueSnapshot,
@@ -80,9 +82,14 @@ export const ipc = {
     invoke<[number, number]>("restore_session"),
 
   listChat: () => invoke<ChatMessage[]>("list_chat"),
-  sendChat: (text: string) =>
-    invoke<QueueItem>("send_chat", { args: { text } }),
+  sendChat: (text: string, attachments: PathAttachment[] = []) =>
+    invoke<QueueItem>("send_chat", { args: { text, attachments } }),
+  suggestPaths: (query: string, workspaceId?: string | null) =>
+    invoke<PathSuggestion[]>("suggest_paths", {
+      args: { query, workspace_id: workspaceId ?? null },
+    }),
   clearChat: () => invoke<void>("clear_chat"),
+  stopChat: () => invoke<boolean>("stop_chat"),
   listChatQueue: () => invoke<QueueItem[]>("list_chat_queue"),
   cancelChatQueueItem: (id: string) =>
     invoke<boolean>("cancel_chat_queue_item", { id }),
