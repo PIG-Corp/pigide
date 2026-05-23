@@ -39,7 +39,8 @@ interface AppStateShape {
 
   // tasks (filtered to current workspace)
   tasks: Record<string, Task>;
-  showKanban: boolean;
+  showTaskBoard: boolean;
+  showPigMemory: boolean;
   newWorkspaceModalOpen: boolean;
 
   // dev / debug
@@ -78,7 +79,8 @@ interface AppStateShape {
   setTasks: (list: Task[]) => void;
   upsertTask: (t: Task) => void;
   removeTask: (id: string) => void;
-  setShowKanban: (v: boolean) => void;
+  setShowTaskBoard: (v: boolean) => void;
+  setShowPigMemory: (v: boolean) => void;
   setNewWorkspaceModalOpen: (v: boolean) => void;
 
   setDevTrace: (v: boolean) => void;
@@ -109,7 +111,8 @@ export const useStore = create<AppStateShape>((set) => ({
   voiceModelDownload: null,
 
   tasks: {},
-  showKanban: false,
+  showTaskBoard: false,
+  showPigMemory: false,
   newWorkspaceModalOpen: false,
 
   devTrace: (() => {
@@ -192,7 +195,8 @@ export const useStore = create<AppStateShape>((set) => ({
       delete next[id];
       return { tasks: next };
     }),
-  setShowKanban: (v) => set({ showKanban: v }),
+  setShowTaskBoard: (v) => set({ showTaskBoard: v }),
+  setShowPigMemory: (v) => set({ showPigMemory: v }),
   setNewWorkspaceModalOpen: (v) => set({ newWorkspaceModalOpen: v }),
 
   setDevTrace: (v) => {

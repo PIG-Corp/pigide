@@ -54,8 +54,8 @@ export function OrchestratorPanel() {
   const tasks = useStore((s) => s.tasks);
   const currentId = useStore((s) => s.currentId);
   const chatScope = useStore((s) => s.chatScope);
-  const showKanban = useStore((s) => s.showKanban);
-  const setShowKanban = useStore((s) => s.setShowKanban);
+  const showTaskBoard = useStore((s) => s.showTaskBoard);
+  const setShowTaskBoard = useStore((s) => s.setShowTaskBoard);
   const devTrace = useStore((s) => s.devTrace);
   const setDevTrace = useStore((s) => s.setDevTrace);
 
@@ -156,9 +156,9 @@ export function OrchestratorPanel() {
     [pushToast],
   );
 
-  const toggleKanban = useCallback(() => {
-    setShowKanban(!showKanban);
-  }, [showKanban, setShowKanban]);
+  const toggleTaskBoard = useCallback(() => {
+    setShowTaskBoard(!showTaskBoard);
+  }, [showTaskBoard, setShowTaskBoard]);
 
   const workspaceTasks = useMemo(
     () =>
@@ -234,8 +234,8 @@ export function OrchestratorPanel() {
 
         <TasksCard
           tasks={workspaceTasks}
-          expanded={showKanban}
-          onToggleExpand={toggleKanban}
+          expanded={showTaskBoard}
+          onToggleExpand={toggleTaskBoard}
         />
 
         <div className="transmission-log-divider">

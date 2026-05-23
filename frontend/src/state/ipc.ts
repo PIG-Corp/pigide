@@ -2,12 +2,14 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
   Agent,
+  AliasSummary,
   Backlink,
   ChatMessage,
   DictEntry,
   DirEntry,
   GraphData,
   LayoutNode,
+  MemoryStatus,
   Note,
   NoteSummary,
   PathAttachment,
@@ -21,6 +23,7 @@ import type {
   SearchHit,
   SshPreset,
   SwarmRole,
+  TagSummary,
   Task,
   TaskStatus,
   Transcript,
@@ -212,6 +215,14 @@ export const ipc = {
     invoke<SearchHit[]>("suggest_connections", { id, limit: limit ?? 5 }),
   memoryGraph: (workspaceId: string) =>
     invoke<GraphData>("memory_graph", { workspaceId }),
+  memoryTags: (workspaceId: string) =>
+    invoke<TagSummary[]>("memory_tags", { workspaceId }),
+  memoryAliases: (workspaceId: string) =>
+    invoke<AliasSummary[]>("memory_aliases", { workspaceId }),
+  memoryStatus: (workspaceId: string) =>
+    invoke<MemoryStatus>("memory_status", { workspaceId }),
+  memoryReindex: (workspaceId: string) =>
+    invoke<MemoryStatus>("memory_reindex", { workspaceId }),
 
   voiceListModels: () => invoke<VoiceModel[]>("voice_list_models"),
   voiceSetModel: (modelId: string) =>

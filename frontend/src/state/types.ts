@@ -158,6 +158,30 @@ export interface GraphData {
   links: GraphEdge[];
 }
 
+export interface TagSummary {
+  name: string;
+  count: number;
+}
+
+export interface AliasSummary {
+  alias: string;
+  id: string;
+  slug: string;
+  title: string;
+}
+
+export interface MemoryStatus {
+  workspace_id: string;
+  root: string;
+  notes: number;
+  links: number;
+  unresolved_links: number;
+  orphans: number;
+  tags: number;
+  aliases: number;
+  last_indexed_at: string;
+}
+
 export interface VoiceModel {
   id: string;
   filename: string;

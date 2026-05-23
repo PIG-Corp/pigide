@@ -2,7 +2,8 @@ import { Allotment } from "allotment";
 import "allotment/dist/style.css";
 import { useStore } from "../state/store";
 import { AgentTile } from "./AgentTile";
-import { KanbanBoard } from "./KanbanBoard";
+import { TaskBoard } from "./TaskBoard";
+import { PigMemoryWorkbench } from "./pigmemory/PigMemoryWorkbench";
 import { ipc } from "../state/ipc";
 import { setRatioAt } from "../layout/tree";
 import type { LayoutNode, RoomTemplate } from "../state/types";
@@ -17,8 +18,10 @@ export function TilingArea() {
   const currentId = useStore((s) => s.currentId);
   const upsertAgent = useStore((s) => s.upsertAgent);
   const pushToast = useStore((s) => s.pushToast);
-  const showKanban = useStore((s) => s.showKanban);
-  const setShowKanban = useStore((s) => s.setShowKanban);
+  const showTaskBoard = useStore((s) => s.showTaskBoard);
+  const setShowTaskBoard = useStore((s) => s.setShowTaskBoard);
+  const showPigMemory = useStore((s) => s.showPigMemory);
+  const setShowPigMemory = useStore((s) => s.setShowPigMemory);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [rooms, setRooms] = useState<RoomTemplate[]>([]);
   const [roomMenuOpen, setRoomMenuOpen] = useState(false);
@@ -120,6 +123,28 @@ export function TilingArea() {
     }
   };
 
+  // PigMemory takes over the whole canvas when active.
+  if (showPigMemory) {
+    return (
+      <div className="tiling-area">
+        <div className="tiling-area-toolbar">
+          <button
+            className="task-board-toggle active"
+            onClick={() => setShowPigMemory(false)}
+            title="Close PigMemory"
+          >
+            ← Back
+          </button>
+          <span className="spacer" />
+          <span className="tiling-area-meta">PigMemory</span>
+        </div>
+        <div className="tiling-area-canvas">
+          <PigMemoryWorkbench />
+        </div>
+      </div>
+    );
+  }
+
   // If we have a maximized leaf, short-circuit to render only it.
   if (maximizedLeafId && agents[maximizedLeafId]) {
     return (
@@ -182,22 +207,29 @@ export function TilingArea() {
           ) : null}
         </div>
         <button
-          className={`kanban-toggle ${showKanban ? "active" : ""}`}
-          onClick={() => setShowKanban(!showKanban)}
-          title="Toggle Kanban board"
+          className={`task-board-toggle ${showTaskBoard ? "active" : ""}`}
+          onClick={() => setShowTaskBoard(!showTaskBoard)}
+          title="Toggle Task Board"
         >
-          Kanban
+          Task Board
+        </button>
+        <button
+          className={`task-board-toggle ${showPigMemory ? "active" : ""}`}
+          onClick={() => setShowPigMemory(true)}
+          title="Open PigMemory"
+        >
+          PigMemory
         </button>
         <span className="tiling-area-meta">
           tiles: {Object.keys(agents).length}
         </span>
       </div>
       <div className="tiling-area-canvas">
-        {showKanban ? (
+        {showTaskBoard ? (
           <Allotment vertical defaultSizes={[60, 40]}>
             <Allotment.Pane minSize={120}>{renderNode(layout)}</Allotment.Pane>
             <Allotment.Pane minSize={160} preferredSize={300}>
-              <KanbanBoard />
+              <TaskBoard />
             </Allotment.Pane>
           </Allotment>
         ) : (

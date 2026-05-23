@@ -3,6 +3,7 @@ import { Allotment } from "allotment";
 import "allotment/dist/style.css";
 import "./styles/tokens.css";
 import "./styles.css";
+import "./styles/pigmemory.css";
 import { WorkspaceSidebar } from "./components/WorkspaceSidebar";
 import { TilingArea } from "./components/TilingArea";
 import { OrchestratorPanel } from "./components/OrchestratorPanel";
