@@ -72,6 +72,9 @@ interface AppStateShape {
   setShowKanban: (v: boolean) => void;
   setNewWorkspaceModalOpen: (v: boolean) => void;
 
+  // Clears all workspace-scoped state when switching workspaces.
+  clearWorkspaceState: () => void;
+
   pushToast: (t: Omit<ToastEntry, "id">) => void;
   dismissToast: (id: string) => void;
 }
@@ -170,6 +173,15 @@ export const useStore = create<AppStateShape>((set) => ({
     }),
   setShowKanban: (v) => set({ showKanban: v }),
   setNewWorkspaceModalOpen: (v) => set({ newWorkspaceModalOpen: v }),
+
+  clearWorkspaceState: () =>
+    set({
+      tasks: {},
+      agents: {},
+      layout: { type: "empty" },
+      focusedLeafId: null,
+      maximizedLeafId: null,
+    }),
 
   pushToast: (t) =>
     set((s) => ({

@@ -1,7 +1,7 @@
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { useStore } from "../state/store";
 import { ipc } from "../state/ipc";
-import { Clock, Loader, Mic, Send, Trash2, X } from "./icons";
+import { Clock, Loader, Mic, Send, Square, Trash2, X } from "./icons";
 import { MentionTextarea, type MentionTextareaHandle } from "./MentionTextarea";
 
 export function OrchestratorPanel() {
@@ -18,11 +18,23 @@ export function OrchestratorPanel() {
 
   const listRef = useRef<HTMLDivElement | null>(null);
   const taRef = useRef<MentionTextareaHandle | null>(null);
+  const userScrolledUp = useRef(false);
 
-  // Auto-scroll on new messages OR queue activity (so the user always
-  // sees the freshly-queued bubble pop in at the bottom).
+  // Track whether the user has manually scrolled up.
   useEffect(() => {
-    if (!listRef.current) return;
+    const el = listRef.current;
+    if (!el) return;
+    const onScroll = () => {
+      const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 50;
+      userScrolledUp.current = !atBottom;
+    };
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => el.removeEventListener("scroll", onScroll);
+  }, []);
+
+  // Auto-scroll on new messages OR queue activity, but only when not scrolled up.
+  useEffect(() => {
+    if (!listRef.current || userScrolledUp.current) return;
     listRef.current.scrollTop = listRef.current.scrollHeight;
   }, [chat, queueItems]);
 
@@ -45,6 +57,14 @@ export function OrchestratorPanel() {
       // the user doesn't lose what they typed.
       setDraft(text);
       pushToast({ text: `send_chat: ${err}`, kind: "error" });
+    }
+  };
+
+  const stop = async () => {
+    try {
+      await ipc.stopChat();
+    } catch (err) {
+      pushToast({ text: `stop_chat: ${err}`, kind: "error" });
     }
   };
 
@@ -71,8 +91,13 @@ export function OrchestratorPanel() {
     <div className="orchestrator-panel">
       <div className="orchestrator-header">
         <span className={`status-dot ${status}`} />
-        <span>Orchestrator</span>
+        <span className="orchestrator-title">Orchestrator</span>
         <span className="spacer" />
+        {queuePending > 0 ? (
+          <span className="chip chip--accent" title="Messages waiting in queue">
+            {queuePending}
+          </span>
+        ) : null}
         <button
           className="btn--icon"
           title="Clear chat & context"
@@ -81,9 +106,6 @@ export function OrchestratorPanel() {
         >
           <Trash2 size={13} />
         </button>
-        <span className="orchestrator-status-label">
-          {status === "idle" ? "ready" : status}
-        </span>
       </div>
 
       <div className="chat-list" ref={listRef}>
@@ -132,9 +154,23 @@ export function OrchestratorPanel() {
               "Enter ↩ to send"
             )}
           </span>
-          <button onClick={send} disabled={!draft.trim()}>
-            <Send size={12} /> Send
-          </button>
+          {status !== "idle" ? (
+            <button
+              onClick={stop}
+              className="btn--destructive btn--sm chat-send"
+              title="Stop orchestrator turn"
+            >
+              <Square size={10} /> Stop
+            </button>
+          ) : (
+            <button
+              onClick={send}
+              disabled={!draft.trim()}
+              className="btn--primary chat-send"
+            >
+              <Send size={12} /> Send
+            </button>
+          )}
         </div>
       </div>
 

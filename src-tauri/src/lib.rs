@@ -1,4 +1,5 @@
 pub mod agent;
+pub mod agentd;
 pub mod architect;
 pub mod chat;
 pub mod chat_queue;
@@ -19,6 +20,7 @@ pub mod path_suggest;
 pub mod project_resolver;
 pub mod prompts;
 pub mod rooms;
+pub mod sanitize;
 pub mod skills;
 pub mod ssh;
 pub mod state;
@@ -180,7 +182,7 @@ pub fn run() {
             .ok()
             .flatten()
             .and_then(|id| ws_mgr.get(&id).ok())
-            .and_then(|w| w.paths.get(0).cloned().map(PathBuf::from));
+            .and_then(|w| w.paths.first().cloned().map(PathBuf::from));
         skills.set_sources(default_sources(None, workspace_dir));
         if let Err(e) = skills.reload_all() {
             tracing::warn!("skills initial scan: {}", e);
@@ -271,9 +273,7 @@ pub fn run() {
                     let handle = st.mcp.clone();
                     let mcp_state = crate::mcp::server::McpState {
                         db: st.db.clone(),
-                        ws_mgr: Arc::new(crate::workspace::WorkspaceManager::new(
-                            st.db.clone(),
-                        )),
+                        ws_mgr: Arc::new(crate::workspace::WorkspaceManager::new(st.db.clone())),
                         agent_mgr: st.agent_mgr.clone(),
                         task_mgr: st.task_mgr.clone(),
                         memory: st.memory.clone(),
@@ -314,25 +314,18 @@ pub fn run() {
                 let mgr = agent_mgr.clone();
                 std::thread::spawn(move || match mgr.restore_session() {
                     Ok((restored, failed)) => {
-                        tracing::info!(
-                            "session restore: {} restored, {} failed",
-                            restored, failed
-                        );
+                        tracing::info!("session restore: {} restored, {} failed", restored, failed);
                     }
                     Err(e) => tracing::warn!("session restore: {}", e),
                 });
             }
 
             // Spawn a memory watcher for the current workspace, if any.
-            let current_ws = db::get_setting(
-                &app.state::<AppState>().db,
-                "current_workspace_id",
-            )
-            .ok()
-            .flatten();
+            let current_ws = db::get_setting(&app.state::<AppState>().db, "current_workspace_id")
+                .ok()
+                .flatten();
             if let Some(ws_id) = current_ws {
-                if let Err(e) =
-                    crate::memory::watcher::spawn(memory.clone(), ws_mgr.clone(), ws_id)
+                if let Err(e) = crate::memory::watcher::spawn(memory.clone(), ws_mgr.clone(), ws_id)
                 {
                     tracing::warn!("memory watcher: {}", e);
                 }
@@ -341,11 +334,9 @@ pub fn run() {
             // Skills hot-reload watchers (built-in + user + workspace).
             {
                 let sources = skills.sources();
-                if let Err(e) = crate::skills::watcher::spawn_all(
-                    app.handle().clone(),
-                    skills.clone(),
-                    sources,
-                ) {
+                if let Err(e) =
+                    crate::skills::watcher::spawn_all(app.handle().clone(), skills.clone(), sources)
+                {
                     tracing::warn!("skills watcher: {}", e);
                 }
             }
@@ -355,14 +346,11 @@ pub fn run() {
             // Opt-in only: set `voice.hotkey_enabled = "true"` to register
             // a global accelerator. Many compositors steal Alt+Space (window
             // menu), so the default is OFF to avoid hanging the WM at startup.
-            let hotkey_on = db::get_setting(
-                &app.state::<AppState>().db,
-                "voice.hotkey_enabled",
-            )
-            .ok()
-            .flatten()
-            .map(|v| v.to_lowercase() == "true")
-            .unwrap_or(false);
+            let hotkey_on = db::get_setting(&app.state::<AppState>().db, "voice.hotkey_enabled")
+                .ok()
+                .flatten()
+                .map(|v| v.to_lowercase() == "true")
+                .unwrap_or(false);
             if hotkey_on {
                 if let Err(e) = crate::voice::hotkey::register(
                     &app.handle().clone(),
@@ -375,6 +363,10 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
+            // Linux/Windows graceful close path: the OS sends a per-window
+            // Destroyed event before the loop tears down. macOS Cmd+Q does
+            // NOT take this path — see the `RunEvent::ExitRequested`/`Exit`
+            // handler in `.run(...)` below for the platform-correct hook.
             if let tauri::WindowEvent::Destroyed = event {
                 if let Some(state) = window.app_handle().try_state::<AppState>() {
                     state.agent_mgr.kill_all();
@@ -438,6 +430,7 @@ pub fn run() {
             commands::list_room_templates,
             commands::apply_room_template,
             commands::list_dir,
+            commands::browse_dir,
             commands::home_dir,
             commands::read_file,
             commands::write_file,
@@ -496,6 +489,30 @@ pub fn run() {
             commands::add_project_alias,
             commands::remove_project_alias,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while running tauri application")
+        .run(|app_handle, event| match event {
+            // macOS Cmd+Q delivers `applicationWillTerminate` which tao
+            // forwards as `Event::LoopDestroyed` → `RunEvent::Exit` WITHOUT
+            // first emitting per-window `Destroyed` events. If we only
+            // hooked `WindowEvent::Destroyed`, the agent manager would
+            // never see `kill_all()` on Cmd+Q — and when the runtime then
+            // dropped `AppState`, each `AgentRuntime`'s master fd would
+            // close, the per-agent reader threads would observe EOF, and
+            // (with `shutting_down=false`) `handle_reader_eof` would write
+            // `UPDATE agents SET status='exited'`, wiping the rows the
+            // next launch needed for `restore_session` to rehydrate.
+            //
+            // Hooking `RunEvent::ExitRequested` (also synthesized on the
+            // graceful path) raises `shutting_down` BEFORE Drop chains run,
+            // so reader-thread cleanup correctly skips the DB write —
+            // matching the SIGKILL/Btop path that already worked because
+            // the process died before any cleanup could execute.
+            tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit => {
+                if let Some(state) = app_handle.try_state::<AppState>() {
+                    state.agent_mgr.kill_all();
+                }
+            }
+            _ => {}
+        });
 }

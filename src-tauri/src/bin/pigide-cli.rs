@@ -29,8 +29,8 @@ fn socket_path() -> PathBuf {
 #[cfg(unix)]
 fn send(req: serde_json::Value) -> Result<serde_json::Value, String> {
     let path = socket_path();
-    let mut stream = UnixStream::connect(&path)
-        .map_err(|e| format!("connect {}: {}", path.display(), e))?;
+    let mut stream =
+        UnixStream::connect(&path).map_err(|e| format!("connect {}: {}", path.display(), e))?;
     let mut payload = req.to_string();
     payload.push('\n');
     stream

@@ -122,9 +122,7 @@ pub fn set_hotkey<R: Runtime>(
         }
         Err(err) => {
             // Best-effort rollback so the user isn't left without a hotkey.
-            if let Err(roll_err) =
-                register_inner(app, &previous_accel, voice, db.clone())
-            {
+            if let Err(roll_err) = register_inner(app, &previous_accel, voice, db.clone()) {
                 tracing::warn!(
                     "failed to roll back voice hotkey to {:?}: {}",
                     previous_accel,
@@ -166,17 +164,15 @@ fn register_inner<R: Runtime>(
     let controller = app
         .try_state::<SharedModeController>()
         .map(|s| s.0.clone())
-        .ok_or_else(|| {
-            Error::Voice("ModeController not managed; call register() first".into())
-        })?;
+        .ok_or_else(|| Error::Voice("ModeController not managed; call register() first".into()))?;
 
     let voice_for_handler = voice;
     let db_for_handler = db;
     let controller_for_handler = controller;
 
-    let reg_result = app.global_shortcut().on_shortcut(
-        shortcut.clone(),
-        move |handle, _sc, event| {
+    let reg_result = app
+        .global_shortcut()
+        .on_shortcut(shortcut, move |handle, _sc, event| {
             // The handler is invoked from the global-hotkey background thread.
             // Keep it cheap: read the mode, ask the controller what to do,
             // then dispatch the heavy work to a tokio task.
@@ -188,8 +184,7 @@ fn register_inner<R: Runtime>(
                 ShortcutState::Released => controller.on_release(mode),
             };
             dispatch(handle.clone(), voice, controller, action);
-        },
-    );
+        });
 
     if let Err(err) = reg_result {
         let msg = format!("failed to register hotkey {:?}: {}", accel, err);
@@ -258,9 +253,7 @@ mod tests {
         let pool = r2d2::Pool::builder().max_size(2).build(manager).unwrap();
         pool.get()
             .unwrap()
-            .execute_batch(
-                "CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);",
-            )
+            .execute_batch("CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);")
             .unwrap();
         pool
     }

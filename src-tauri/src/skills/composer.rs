@@ -92,10 +92,7 @@ fn render_tokens(tokens: &[Token], ctx: &BTreeMap<String, Value>) -> String {
 
 /// Locate matching `{{else}}` and `{{/if}}` for the IfOpen at `start`.
 /// Returns `(then_tokens, else_tokens, index_after_endif)`.
-fn split_if<'a>(
-    tokens: &'a [Token],
-    start: usize,
-) -> (&'a [Token], Option<&'a [Token]>, usize) {
+fn split_if(tokens: &[Token], start: usize) -> (&[Token], Option<&[Token]>, usize) {
     let mut depth = 1;
     let mut else_at: Option<usize> = None;
     let mut end_at = start + 1;
@@ -208,7 +205,10 @@ mod tests {
     use serde_json::json;
 
     fn ctx_of(pairs: &[(&str, Value)]) -> BTreeMap<String, Value> {
-        pairs.iter().map(|(k, v)| (k.to_string(), v.clone())).collect()
+        pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.clone()))
+            .collect()
     }
 
     #[test]
@@ -226,19 +226,13 @@ mod tests {
     #[test]
     fn if_block_truthy() {
         let ctx = ctx_of(&[("v", json!("present"))]);
-        assert_eq!(
-            render("a{{#if v}}b{{/if}}c", &ctx),
-            "abc"
-        );
+        assert_eq!(render("a{{#if v}}b{{/if}}c", &ctx), "abc");
     }
 
     #[test]
     fn if_block_falsy_uses_else() {
         let ctx = ctx_of(&[]);
-        assert_eq!(
-            render("a{{#if v}}b{{else}}B{{/if}}c", &ctx),
-            "aBc"
-        );
+        assert_eq!(render("a{{#if v}}b{{else}}B{{/if}}c", &ctx), "aBc");
     }
 
     #[test]

@@ -4,7 +4,8 @@
 //! Свободно-формовые вопросы ("describe the bug", "what name?") тоже
 //! эскалируются — мы не пытаемся их додумать.
 
-use super::classifier::{looks_destructive, strip_ansi, AgentSignal};
+use super::classifier::{looks_destructive, AgentSignal};
+use crate::sanitize::strip_ansi;
 use once_cell::sync::Lazy;
 use regex::Regex;
 
@@ -92,10 +93,13 @@ fn parse_numeric_choice(text: &str) -> Option<(u8, bool)> {
             }
         }
     }
-    if count < 2 || count > 5 {
+    if !(2..=5).contains(&count) {
         return None;
     }
-    Some((default_idx.unwrap_or(1), default_idx.is_some() && !multiple_defaults))
+    Some((
+        default_idx.unwrap_or(1),
+        default_idx.is_some() && !multiple_defaults,
+    ))
 }
 
 /// Из последних строк tail вытащить «вопрос» (для quote в decision-log /
@@ -107,7 +111,7 @@ pub fn extract_quote(tail: &str) -> String {
     let take = lines.len().saturating_sub(6);
     let mut q = lines[take..].join("\n");
     if q.len() > 240 {
-        let cut = q.len() - 240;
+        let cut = q.ceil_char_boundary(q.len() - 240);
         q = format!("…{}", &q[cut..]);
     }
     q
@@ -258,7 +262,11 @@ mod tests {
     fn numeric_with_default_auto_chooses() {
         let tail = "Pick build:\n[1] release (default)\n[2] debug\n> ";
         let d = decide(AgentSignal::AwaitingInput, tail, false, false, false);
-        assert!(matches!(d, PolicyDecision::AutoChoose { index: 1, .. }), "{:?}", d);
+        assert!(
+            matches!(d, PolicyDecision::AutoChoose { index: 1, .. }),
+            "{:?}",
+            d
+        );
     }
 
     #[test]
@@ -286,7 +294,11 @@ mod tests {
     fn first_error_retries() {
         let tail = "error: cannot find module foo";
         let d = decide(AgentSignal::Error, tail, false, false, false);
-        assert!(matches!(d, PolicyDecision::AutoRetryError { .. }), "{:?}", d);
+        assert!(
+            matches!(d, PolicyDecision::AutoRetryError { .. }),
+            "{:?}",
+            d
+        );
     }
 
     #[test]

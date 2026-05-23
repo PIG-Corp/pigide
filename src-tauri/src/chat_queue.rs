@@ -91,9 +91,7 @@ pub fn ensure_table(db: &DbPool) -> Result<()> {
     // Defence-in-depth: if the table existed before v13, ALTER it now.
     // SQLite is happy to no-op an "already exists" column add; we ignore
     // the error so this stays idempotent.
-    let _ = conn.execute_batch(
-        "ALTER TABLE chat_queue ADD COLUMN attachments_json TEXT",
-    );
+    let _ = conn.execute_batch("ALTER TABLE chat_queue ADD COLUMN attachments_json TEXT");
     Ok(())
 }
 
@@ -333,10 +331,8 @@ mod tests {
         // settings table is needed for `continue_on_error` reads in some tests.
         {
             let conn = pool.get().unwrap();
-            conn.execute_batch(
-                "CREATE TABLE settings(key TEXT PRIMARY KEY, value TEXT NOT NULL);",
-            )
-            .unwrap();
+            conn.execute_batch("CREATE TABLE settings(key TEXT PRIMARY KEY, value TEXT NOT NULL);")
+                .unwrap();
         }
         ensure_table(&pool).unwrap();
         pool
@@ -517,18 +513,13 @@ mod tests {
         outcomes: &mut std::collections::HashMap<String, bool>,
     ) -> Vec<String> {
         let mut order = Vec::new();
-        loop {
-            let item = match claim_next(db, session).unwrap() {
-                Some(it) => it,
-                None => break,
-            };
-            order.push(item.text.clone());
-            // Look up scripted outcome by text; default = success.
-            let ok = outcomes.remove(&item.text).unwrap_or(true);
+        while let Some(it) = claim_next(db, session).unwrap() {
+            order.push(it.text.clone());
+            let ok = outcomes.remove(&it.text).unwrap_or(true);
             if ok {
-                mark_done(db, &item.id).unwrap();
+                mark_done(db, &it.id).unwrap();
             } else {
-                mark_failed(db, &item.id).unwrap();
+                mark_failed(db, &it.id).unwrap();
                 if !continue_on_error(db) {
                     break;
                 }

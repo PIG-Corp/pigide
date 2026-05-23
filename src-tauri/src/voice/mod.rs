@@ -15,8 +15,8 @@ use download::ModelId;
 use parking_lot::{Mutex, RwLock};
 use serde_json::json;
 use std::collections::HashMap;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use std::time::Instant;
 use tauri::{AppHandle, Emitter};
 
@@ -111,10 +111,7 @@ impl VoicePipeline {
             Err(e) => {
                 tracing::error!("whisper model unavailable: {}", e);
                 if is_current() {
-                    self.emit_transcript(&format!(
-                        "[error: speech model unavailable: {}]",
-                        e
-                    ));
+                    self.emit_transcript(&format!("[error: speech model unavailable: {}]", e));
                     self.emit_state("idle");
                 }
                 return Ok(());

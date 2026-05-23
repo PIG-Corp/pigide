@@ -136,11 +136,7 @@ pub fn get(db: &DbPool, id: &str) -> Result<Prompt> {
 /// List prompts visible to `workspace_id`. When `workspace_id` is provided,
 /// returns workspace-scoped prompts and any global ones (`workspace_id IS
 /// NULL`) so a user can keep cross-project favourites.
-pub fn list(
-    db: &DbPool,
-    workspace_id: Option<&str>,
-    tag: Option<&str>,
-) -> Result<Vec<Prompt>> {
+pub fn list(db: &DbPool, workspace_id: Option<&str>, tag: Option<&str>) -> Result<Vec<Prompt>> {
     let conn = db.get()?;
     let prompts = match workspace_id {
         Some(ws) => {
@@ -170,7 +166,10 @@ pub fn list(
         }
     };
     let out = match tag {
-        Some(t) => prompts.into_iter().filter(|p| p.tags.iter().any(|x| x == t)).collect(),
+        Some(t) => prompts
+            .into_iter()
+            .filter(|p| p.tags.iter().any(|x| x == t))
+            .collect(),
         None => prompts,
     };
     Ok(out)

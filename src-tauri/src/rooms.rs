@@ -19,7 +19,9 @@ pub struct RoomAgentSpec {
     #[serde(default = "one")]
     pub count: usize,
 }
-fn one() -> usize { 1 }
+fn one() -> usize {
+    1
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RoomTaskSpec {
@@ -49,7 +51,8 @@ pub fn catalog() -> Vec<RoomTemplate> {
         RoomTemplate {
             id: "command".into(),
             name: "Command Room".into(),
-            description: "Single shell-style agent for direct commands. Best for ad-hoc work.".into(),
+            description: "Single shell-style agent for direct commands. Best for ad-hoc work."
+                .into(),
             agents: vec![RoomAgentSpec {
                 agent_type: "kiro-cli".into(),
                 role: "builder".into(),
@@ -62,9 +65,21 @@ pub fn catalog() -> Vec<RoomTemplate> {
             name: "Swarm Room".into(),
             description: "Coordinator + 3 builders + 1 reviewer for parallel work.".into(),
             agents: vec![
-                RoomAgentSpec { agent_type: "claude".into(), role: "coordinator".into(), count: 1 },
-                RoomAgentSpec { agent_type: "kiro-cli".into(), role: "builder".into(), count: 3 },
-                RoomAgentSpec { agent_type: "claude".into(), role: "reviewer".into(), count: 1 },
+                RoomAgentSpec {
+                    agent_type: "claude".into(),
+                    role: "coordinator".into(),
+                    count: 1,
+                },
+                RoomAgentSpec {
+                    agent_type: "kiro-cli".into(),
+                    role: "builder".into(),
+                    count: 3,
+                },
+                RoomAgentSpec {
+                    agent_type: "claude".into(),
+                    role: "reviewer".into(),
+                    count: 1,
+                },
             ],
             tasks: vec![],
         },
@@ -79,7 +94,8 @@ pub fn catalog() -> Vec<RoomTemplate> {
             }],
             tasks: vec![RoomTaskSpec {
                 title: "Review pending changes".into(),
-                instructions: "Inspect git diff vs. base branch, flag issues, decide PASS/FAIL.".into(),
+                instructions: "Inspect git diff vs. base branch, flag issues, decide PASS/FAIL."
+                    .into(),
             }],
         },
         RoomTemplate {

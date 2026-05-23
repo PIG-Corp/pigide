@@ -179,8 +179,14 @@ pub fn default_roots() -> Vec<ClaudeSourceRoot> {
     };
     push("user", home.join(".claude").join("skills"));
     push("user-agents", home.join(".claude").join("agents"));
-    push("plugins-marketplaces", home.join(".claude").join("plugins").join("marketplaces"));
-    push("plugins-cache", home.join(".claude").join("plugins").join("cache"));
+    push(
+        "plugins-marketplaces",
+        home.join(".claude").join("plugins").join("marketplaces"),
+    );
+    push(
+        "plugins-cache",
+        home.join(".claude").join("plugins").join("cache"),
+    );
     // Common sibling repos people clone next to their home dir.
     push("repo:claude-skills", home.join("claude-skills"));
     out
@@ -336,11 +342,13 @@ impl ClaudeFrontmatter {
             let line = raw_line.trim_end();
             if in_tools_block {
                 if let Some(item) = line.strip_prefix("  - ") {
-                    out.allowed_tools.push(item.trim().trim_matches(&['"', '\''][..]).to_string());
+                    out.allowed_tools
+                        .push(item.trim().trim_matches(&['"', '\''][..]).to_string());
                     continue;
                 }
                 if let Some(item) = line.strip_prefix("- ") {
-                    out.allowed_tools.push(item.trim().trim_matches(&['"', '\''][..]).to_string());
+                    out.allowed_tools
+                        .push(item.trim().trim_matches(&['"', '\''][..]).to_string());
                     continue;
                 }
                 in_tools_block = false;
@@ -353,22 +361,16 @@ impl ClaudeFrontmatter {
             let val = v.trim();
             match key {
                 "name" => out.name = val.trim_matches(&['"', '\''][..]).to_string(),
-                "description" => {
-                    out.description = val.trim_matches(&['"', '\''][..]).to_string()
-                }
-                "model" => {
-                    if !val.is_empty() {
-                        out.model =
-                            Some(val.trim_matches(&['"', '\''][..]).to_string())
-                    }
+                "description" => out.description = val.trim_matches(&['"', '\''][..]).to_string(),
+                "model" if !val.is_empty() => {
+                    out.model = Some(val.trim_matches(&['"', '\''][..]).to_string())
                 }
                 "allowed-tools" | "tools" => {
                     let trimmed = val.trim();
                     if trimmed.is_empty() {
                         in_tools_block = true;
-                    } else if let Some(rest) = trimmed
-                        .strip_prefix('[')
-                        .and_then(|s| s.strip_suffix(']'))
+                    } else if let Some(rest) =
+                        trimmed.strip_prefix('[').and_then(|s| s.strip_suffix(']'))
                     {
                         for item in rest.split(',') {
                             let s = item.trim().trim_matches(&['"', '\''][..]);
@@ -465,10 +467,7 @@ fn render_pigide_skill(s: &PigideSkill) -> String {
     let mut out = String::with_capacity(512 + s.body.len());
     out.push_str("---\n");
     out.push_str(&format!("id: {}\n", s.frontmatter.id));
-    out.push_str(&format!(
-        "name: {}\n",
-        yaml_string(&s.frontmatter.name)
-    ));
+    out.push_str(&format!("name: {}\n", yaml_string(&s.frontmatter.name)));
     out.push_str(&format!(
         "description: {}\n",
         yaml_string(&s.frontmatter.description)
@@ -489,7 +488,11 @@ fn render_pigide_skill(s: &PigideSkill) -> String {
     }
     out.push_str(&format!(
         "enabled: {}\n",
-        if s.frontmatter.enabled { "true" } else { "false" }
+        if s.frontmatter.enabled {
+            "true"
+        } else {
+            "false"
+        }
     ));
     out.push_str("---\n");
     out.push_str(&s.body);
@@ -565,7 +568,7 @@ fn humanize_name(name: &str) -> String {
     if name.is_empty() {
         return name.to_string();
     }
-    name.split(|c: char| c == '-' || c == '_' || c == '/')
+    name.split(['-', '_', '/'])
         .filter(|p| !p.is_empty())
         .map(|p| {
             let mut chars = p.chars();
@@ -583,6 +586,8 @@ mod tests {
     use super::*;
     use std::fs;
     use std::path::PathBuf;
+
+    static HOME_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     struct Tmp {
         path: PathBuf,
@@ -673,6 +678,7 @@ Use when debugging.
 
     #[test]
     fn import_creates_then_unchanged_then_updates() {
+        let _lock = HOME_MUTEX.lock().unwrap();
         // Create a fake source dir with one Claude skill.
         let src = Tmp::new("src");
         write(&src.path.join("gsd-debug").join("SKILL.md"), CLAUDE_SAMPLE);
@@ -683,17 +689,20 @@ Use when debugging.
         std::env::set_var("HOME", &home.path);
 
         // First import.
-        let r1 = import(&[src.path.clone()]).unwrap();
+        let r1 = import(std::slice::from_ref(&src.path)).unwrap();
         let row1 = r1
             .imported
             .iter()
             .find(|i| i.id == "claude-gsd-debug")
             .expect("expected gsd-debug to be imported");
         assert_eq!(row1.status, ImportStatus::Created);
-        assert!(row1.warnings.iter().any(|w| w.contains("PrivateInternalTool")));
+        assert!(row1
+            .warnings
+            .iter()
+            .any(|w| w.contains("PrivateInternalTool")));
 
         // Second import — same content → unchanged.
-        let r2 = import(&[src.path.clone()]).unwrap();
+        let r2 = import(std::slice::from_ref(&src.path)).unwrap();
         let row2 = r2
             .imported
             .iter()
@@ -706,7 +715,7 @@ Use when debugging.
         // Mutate source → updated.
         let mutated = CLAUDE_SAMPLE.replace("Systematic debugging", "Systematic debugging v2");
         write(&src.path.join("gsd-debug").join("SKILL.md"), &mutated);
-        let r3 = import(&[src.path.clone()]).unwrap();
+        let r3 = import(std::slice::from_ref(&src.path)).unwrap();
         let row3 = r3
             .imported
             .iter()
@@ -723,6 +732,7 @@ Use when debugging.
 
     #[test]
     fn imported_file_is_valid_pigide_skill() {
+        let _lock = HOME_MUTEX.lock().unwrap();
         // End-to-end: import, then re-parse via the PigIDE parser.
         let src = Tmp::new("src2");
         write(&src.path.join("hello").join("SKILL.md"), CLAUDE_SAMPLE);
@@ -730,7 +740,7 @@ Use when debugging.
         let prev_home = std::env::var_os("HOME");
         std::env::set_var("HOME", &home.path);
 
-        let report = import(&[src.path.clone()]).unwrap();
+        let report = import(std::slice::from_ref(&src.path)).unwrap();
         let row = &report.imported[0];
         let raw = std::fs::read_to_string(&row.written_to).unwrap();
         let parsed = crate::skills::skill::parse(
@@ -753,21 +763,24 @@ Use when debugging.
 
     #[test]
     fn skips_files_without_frontmatter() {
+        let _lock = HOME_MUTEX.lock().unwrap();
         let src = Tmp::new("src3");
-        write(&src.path.join("misc").join("notes.md"), "no frontmatter here\n");
+        write(
+            &src.path.join("misc").join("notes.md"),
+            "no frontmatter here\n",
+        );
         let home = Tmp::new("home3");
         let prev_home = std::env::var_os("HOME");
         std::env::set_var("HOME", &home.path);
 
-        let report = import(&[src.path.clone()]).unwrap();
+        let report = import(std::slice::from_ref(&src.path)).unwrap();
         // Either the file is skipped or not picked up at all; the imported
         // count for files without `name:` must be zero.
         assert_eq!(
             report
                 .imported
                 .iter()
-                .filter(|i| i.status == ImportStatus::Created
-                    || i.status == ImportStatus::Updated)
+                .filter(|i| i.status == ImportStatus::Created || i.status == ImportStatus::Updated)
                 .count(),
             0
         );

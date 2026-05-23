@@ -42,7 +42,10 @@ pub fn spawn(
                     return;
                 }
             };
-            if let Err(e) = debouncer.watcher().watch(&root_clone, RecursiveMode::Recursive) {
+            if let Err(e) = debouncer
+                .watcher()
+                .watch(&root_clone, RecursiveMode::Recursive)
+            {
                 tracing::warn!("memory watcher: watch failed for {:?}: {}", root_clone, e);
                 return;
             }
@@ -67,12 +70,7 @@ pub fn spawn(
     Ok(())
 }
 
-fn handle_event(
-    memory: &Arc<MemoryService>,
-    workspace_id: &str,
-    root: &Path,
-    ev: &DebouncedEvent,
-) {
+fn handle_event(memory: &Arc<MemoryService>, workspace_id: &str, root: &Path, ev: &DebouncedEvent) {
     use notify::EventKind;
     let paths: Vec<PathBuf> = ev.event.paths.clone();
     for path in paths {

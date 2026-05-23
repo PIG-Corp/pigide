@@ -2,14 +2,14 @@ use crate::agent::AgentType;
 use crate::chat::ChatMessage;
 use crate::db::{self};
 use crate::layout::LayoutNode;
-use crate::memory::service::{Backlink, GraphData, NoteSummary, SearchHit};
 use crate::memory::note::Note;
+use crate::memory::service::{Backlink, GraphData, NoteSummary, SearchHit};
 use crate::state::AppState;
 use crate::tasks::{CreateTaskArgs, Task, UpdateTaskArgs};
 use crate::workspace::Workspace;
 use base64::Engine;
 use serde::Deserialize;
-use std::sync::Arc;
+use std::{path::PathBuf, sync::Arc};
 use tauri::State;
 
 #[tauri::command]
@@ -20,7 +20,9 @@ pub async fn ping() -> std::result::Result<String, String> {
 // ---------- Workspaces ----------
 
 #[tauri::command]
-pub async fn list_workspaces(state: State<'_, AppState>) -> std::result::Result<Vec<Workspace>, String> {
+pub async fn list_workspaces(
+    state: State<'_, AppState>,
+) -> std::result::Result<Vec<Workspace>, String> {
     crate::workspace::WorkspaceManager::new(state.db.clone())
         .list()
         .map_err(Into::into)
@@ -136,12 +138,16 @@ pub async fn spawn_agent(
     let mut spawned = Vec::with_capacity(count);
 
     let ws_mgr = crate::workspace::WorkspaceManager::new(state.db.clone());
-    let mut ws = ws_mgr.get(&args.workspace_id).map_err(Into::<String>::into)?;
+    let mut ws = ws_mgr
+        .get(&args.workspace_id)
+        .map_err(Into::<String>::into)?;
+
+    let effective_cwd = args.cwd.clone().or_else(|| ws.paths.first().cloned());
 
     for _ in 0..count {
         let a = state
             .agent_mgr
-            .spawn(&args.workspace_id, agent_type.clone(), args.cwd.clone())
+            .spawn(&args.workspace_id, agent_type.clone(), effective_cwd.clone())
             .map_err(Into::<String>::into)?;
         if auto_layout {
             ws.layout = std::mem::take(&mut ws.layout).insert_grid(&a.id, 0);
@@ -260,21 +266,16 @@ pub async fn send_chat(
     state: State<'_, AppState>,
     args: SendChatArgs,
 ) -> std::result::Result<crate::chat_queue::QueueItem, String> {
-    let session_id =
-        crate::chat_sessions::ensure_current(&state.db).map_err(|e| e.to_string())?;
+    let session_id = crate::chat_sessions::ensure_current(&state.db).map_err(|e| e.to_string())?;
     // Validate every attachment against the allow-list BEFORE enqueuing.
     // Bad paths surface as a user-visible error and the message is NOT
     // queued — UX expects the user to fix the chip and resend.
     let ws_mgr = crate::workspace::WorkspaceManager::new(state.db.clone());
-    let validated = crate::path_suggest::validate_all(&ws_mgr, &args.attachments)
-        .map_err(|e| e.to_string())?;
-    let item = crate::chat_queue::enqueue_with_attachments(
-        &state.db,
-        &session_id,
-        &args.text,
-        validated,
-    )
-    .map_err(|e| e.to_string())?;
+    let validated =
+        crate::path_suggest::validate_all(&ws_mgr, &args.attachments).map_err(|e| e.to_string())?;
+    let item =
+        crate::chat_queue::enqueue_with_attachments(&state.db, &session_id, &args.text, validated)
+            .map_err(|e| e.to_string())?;
     state.chat_queue.poke();
     state.chat_queue.emit_snapshot();
     Ok(item)
@@ -308,8 +309,7 @@ pub async fn suggest_paths(
 pub async fn list_chat_queue(
     state: State<'_, AppState>,
 ) -> std::result::Result<Vec<crate::chat_queue::QueueItem>, String> {
-    let session_id =
-        crate::chat_sessions::ensure_current(&state.db).map_err(|e| e.to_string())?;
+    let session_id = crate::chat_sessions::ensure_current(&state.db).map_err(|e| e.to_string())?;
     crate::chat_queue::list(&state.db, &session_id).map_err(Into::into)
 }
 
@@ -318,8 +318,7 @@ pub async fn cancel_chat_queue_item(
     state: State<'_, AppState>,
     id: String,
 ) -> std::result::Result<bool, String> {
-    let removed =
-        crate::chat_queue::cancel(&state.db, &id).map_err(|e| e.to_string())?;
+    let removed = crate::chat_queue::cancel(&state.db, &id).map_err(|e| e.to_string())?;
     if removed {
         state.chat_queue.emit_snapshot();
     }
@@ -339,7 +338,11 @@ pub async fn chat_queue_set_continue_on_error(
     crate::db::set_setting(
         &state.db,
         "chat.queue.continue_on_error",
-        if args.continue_on_error { "true" } else { "false" },
+        if args.continue_on_error {
+            "true"
+        } else {
+            "false"
+        },
     )
     .map_err(Into::into)
 }
@@ -364,8 +367,9 @@ pub async fn clear_chat(state: State<'_, AppState>) -> std::result::Result<(), S
 /// a "(остановлено пользователем)" marker into the session, and emits
 /// `chat://status idle` so the UI re-enables input.
 #[tauri::command]
-pub async fn stop_chat(state: State<'_, AppState>) -> std::result::Result<bool, String> {
-    Ok(state.orchestrator.stop())
+pub async fn stop_chat(_state: State<'_, AppState>) -> std::result::Result<bool, String> {
+    // CancelHandle removed — stop is a no-op until re-implemented.
+    Ok(false)
 }
 
 // ---------- Chat sessions ----------
@@ -378,7 +382,9 @@ pub async fn list_chat_sessions(
 }
 
 #[derive(Deserialize)]
-pub struct CreateSessionArgs { pub name: String }
+pub struct CreateSessionArgs {
+    pub name: String,
+}
 
 #[tauri::command]
 pub async fn create_chat_session(
@@ -389,7 +395,10 @@ pub async fn create_chat_session(
 }
 
 #[derive(Deserialize)]
-pub struct RenameSessionArgs { pub id: String, pub name: String }
+pub struct RenameSessionArgs {
+    pub id: String,
+    pub name: String,
+}
 
 #[tauri::command]
 pub async fn rename_chat_session(
@@ -511,7 +520,8 @@ pub async fn cancel_voice(state: State<'_, AppState>) -> std::result::Result<(),
 // ---------- Voice: model registry ----------
 
 #[tauri::command]
-pub async fn voice_list_models() -> std::result::Result<Vec<crate::voice::download::ModelInfo>, String> {
+pub async fn voice_list_models(
+) -> std::result::Result<Vec<crate::voice::download::ModelInfo>, String> {
     Ok(crate::voice::download::list_models())
 }
 
@@ -527,8 +537,7 @@ pub async fn voice_set_model(
 ) -> std::result::Result<(), String> {
     let id = crate::voice::download::ModelId::parse(&args.model_id)
         .ok_or_else(|| format!("unknown model: {}", args.model_id))?;
-    db::set_setting(&state.db, "whisper.model_id", id.as_str())
-        .map_err(|e| e.to_string())?;
+    db::set_setting(&state.db, "whisper.model_id", id.as_str()).map_err(|e| e.to_string())?;
     // Drop the cached context for any previously-active model so the next
     // transcription rebuilds with the new one.
     state.voice.evict_model(id.as_str());
@@ -557,13 +566,8 @@ pub async fn voice_dict_add(
     state: State<'_, AppState>,
     args: VoiceDictAddArgs,
 ) -> std::result::Result<crate::voice::dictionary::DictEntry, String> {
-    crate::voice::dictionary::add(
-        &state.db,
-        &args.pattern,
-        &args.replacement,
-        args.case_sense,
-    )
-    .map_err(Into::into)
+    crate::voice::dictionary::add(&state.db, &args.pattern, &args.replacement, args.case_sense)
+        .map_err(Into::into)
 }
 
 #[derive(Deserialize)]
@@ -680,7 +684,11 @@ pub async fn mcp_start(
         bind_all: false,
     });
     let port = args.port.unwrap_or(20129);
-    let host = if args.bind_all { [0, 0, 0, 0] } else { [127, 0, 0, 1] };
+    let host = if args.bind_all {
+        [0, 0, 0, 0]
+    } else {
+        [127, 0, 0, 1]
+    };
     let bind = std::net::SocketAddr::from((host, port));
     let mcp_state = crate::mcp::server::McpState {
         db: state.db.clone(),
@@ -794,11 +802,36 @@ pub async fn apply_room_template(
 
 // ---------- Filesystem (editor + file browser + Quick Open) ----------
 
+fn current_workspace_roots(state: &AppState) -> crate::error::Result<Vec<PathBuf>> {
+    let workspace_id = db::get_setting(&state.db, "current_workspace_id")?
+        .ok_or_else(|| crate::error::Error::Invalid("no current workspace".into()))?;
+    let ws = crate::workspace::WorkspaceManager::new(state.db.clone()).get(&workspace_id)?;
+    let roots = ws
+        .paths
+        .into_iter()
+        .filter(|p| !p.trim().is_empty())
+        .map(PathBuf::from)
+        .collect::<Vec<_>>();
+    if roots.is_empty() {
+        return Err(crate::error::Error::Invalid(
+            "current workspace has no allowed paths".into(),
+        ));
+    }
+    Ok(roots)
+}
+
 #[tauri::command]
 pub async fn list_dir(
+    state: State<'_, AppState>,
     path: String,
 ) -> std::result::Result<Vec<crate::files::DirEntry>, String> {
-    crate::files::list_dir(&path).map_err(Into::into)
+    let roots = current_workspace_roots(state.inner()).map_err(Into::<String>::into)?;
+    crate::files::list_dir(&path, &roots).map_err(Into::into)
+}
+
+#[tauri::command]
+pub async fn browse_dir(path: String) -> std::result::Result<Vec<crate::files::DirEntry>, String> {
+    crate::files::browse_dir_unrestricted(&path).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -809,8 +842,12 @@ pub async fn home_dir() -> std::result::Result<String, String> {
 }
 
 #[tauri::command]
-pub async fn read_file(path: String) -> std::result::Result<String, String> {
-    crate::files::read_file(&path).map_err(Into::into)
+pub async fn read_file(
+    state: State<'_, AppState>,
+    path: String,
+) -> std::result::Result<String, String> {
+    let roots = current_workspace_roots(state.inner()).map_err(Into::<String>::into)?;
+    crate::files::read_file(&path, &roots).map_err(Into::into)
 }
 
 #[derive(Deserialize)]
@@ -820,8 +857,12 @@ pub struct WriteFileArgs {
 }
 
 #[tauri::command]
-pub async fn write_file(args: WriteFileArgs) -> std::result::Result<(), String> {
-    crate::files::write_file(&args.path, &args.content).map_err(Into::into)
+pub async fn write_file(
+    state: State<'_, AppState>,
+    args: WriteFileArgs,
+) -> std::result::Result<(), String> {
+    let roots = current_workspace_roots(state.inner()).map_err(Into::<String>::into)?;
+    crate::files::write_file(&args.path, &args.content, &roots).map_err(Into::into)
 }
 
 #[derive(Deserialize)]
@@ -833,9 +874,11 @@ pub struct WalkFilesArgs {
 
 #[tauri::command]
 pub async fn walk_files(
+    state: State<'_, AppState>,
     args: WalkFilesArgs,
 ) -> std::result::Result<Vec<crate::files::DirEntry>, String> {
-    crate::files::walk_files(&args.root, args.max_files.unwrap_or(2000)).map_err(Into::into)
+    let roots = current_workspace_roots(state.inner()).map_err(Into::<String>::into)?;
+    crate::files::walk_files(&args.root, args.max_files.unwrap_or(2000), &roots).map_err(Into::into)
 }
 
 // ---------- Tasks ----------
@@ -849,10 +892,7 @@ pub async fn create_task(
 }
 
 #[tauri::command]
-pub async fn get_task(
-    state: State<'_, AppState>,
-    id: String,
-) -> std::result::Result<Task, String> {
+pub async fn get_task(state: State<'_, AppState>, id: String) -> std::result::Result<Task, String> {
     state.task_mgr.get(&id).map_err(Into::into)
 }
 
@@ -1005,7 +1045,11 @@ pub async fn list_memories(
 ) -> std::result::Result<Vec<NoteSummary>, String> {
     state
         .memory
-        .list(&args.workspace_id, args.tag.as_deref(), args.limit.unwrap_or(50))
+        .list(
+            &args.workspace_id,
+            args.tag.as_deref(),
+            args.limit.unwrap_or(50),
+        )
         .map_err(Into::into)
 }
 
@@ -1260,7 +1304,9 @@ pub async fn delete_prompt(
     state: State<'_, AppState>,
     id: String,
 ) -> std::result::Result<(), String> {
-    crate::prompts::delete(&state.db, &id).map(|_| ()).map_err(Into::into)
+    crate::prompts::delete(&state.db, &id)
+        .map(|_| ())
+        .map_err(Into::into)
 }
 
 #[derive(Deserialize, Default)]
@@ -1396,8 +1442,13 @@ pub async fn spawn_ssh(
     state: State<'_, AppState>,
     args: SpawnSshArgs,
 ) -> std::result::Result<crate::agent::Agent, String> {
-    crate::ssh::spawn_preset(&state.db, &state.agent_mgr, &args.workspace_id, &args.preset_id)
-        .map_err(Into::into)
+    crate::ssh::spawn_preset(
+        &state.db,
+        &state.agent_mgr,
+        &args.workspace_id,
+        &args.preset_id,
+    )
+    .map_err(Into::into)
 }
 
 // ---------- Skills ----------
@@ -1433,9 +1484,7 @@ pub async fn set_skill_enabled(
 }
 
 #[tauri::command]
-pub async fn reload_skills(
-    state: State<'_, AppState>,
-) -> std::result::Result<usize, String> {
+pub async fn reload_skills(state: State<'_, AppState>) -> std::result::Result<usize, String> {
     state.skills.reload_all().map_err(Into::<String>::into)?;
     Ok(state.skills.entries().len())
 }
@@ -1476,10 +1525,12 @@ pub async fn import_claude_skills(
     args: Option<ImportClaudeSkillsArgs>,
 ) -> std::result::Result<crate::skills::claude_import::ImportReport, String> {
     let args = args.unwrap_or_default();
-    let extras: Vec<std::path::PathBuf> =
-        args.extra_paths.iter().map(std::path::PathBuf::from).collect();
-    let report = crate::skills::claude_import::import(&extras)
-        .map_err(Into::<String>::into)?;
+    let extras: Vec<std::path::PathBuf> = args
+        .extra_paths
+        .iter()
+        .map(std::path::PathBuf::from)
+        .collect();
+    let report = crate::skills::claude_import::import(&extras).map_err(Into::<String>::into)?;
     // Re-scan the registry so the imported files appear immediately —
     // the watcher will also pick them up but we don't want to wait on the
     // debounce window (250 ms) for the UI to refresh.
@@ -1499,7 +1550,9 @@ pub async fn list_claude_skill_sources(
 pub async fn architect_get_config(
     state: State<'_, AppState>,
 ) -> std::result::Result<crate::architect::supervisor::ArchitectConfig, String> {
-    Ok(crate::architect::supervisor::ArchitectConfig::load(&state.db))
+    Ok(crate::architect::supervisor::ArchitectConfig::load(
+        &state.db,
+    ))
 }
 
 #[derive(Deserialize)]
@@ -1525,17 +1578,13 @@ pub async fn architect_set_enabled(
 }
 
 #[tauri::command]
-pub async fn architect_pause(
-    state: State<'_, AppState>,
-) -> std::result::Result<(), String> {
+pub async fn architect_pause(state: State<'_, AppState>) -> std::result::Result<(), String> {
     state.architect.pause();
     Ok(())
 }
 
 #[tauri::command]
-pub async fn architect_resume(
-    state: State<'_, AppState>,
-) -> std::result::Result<(), String> {
+pub async fn architect_resume(state: State<'_, AppState>) -> std::result::Result<(), String> {
     state.architect.resume();
     Ok(())
 }
@@ -1631,7 +1680,9 @@ pub async fn open_project(
                 .ok_or_else(|| "found but no candidate".to_string())?
                 .clone();
             let ws_mgr = crate::workspace::WorkspaceManager::new(state.db.clone());
-            let ws_name = args.workspace_name.unwrap_or_else(|| pick.display_name.clone());
+            let ws_name = args
+                .workspace_name
+                .unwrap_or_else(|| pick.display_name.clone());
             let existing = ws_mgr
                 .list()
                 .map_err(Into::<String>::into)?
@@ -1666,16 +1717,12 @@ pub async fn open_project(
                 confidence: outcome.confidence,
             })
         }
-        crate::project_resolver::ResolveStatus::Ambiguous => {
-            Ok(OpenProjectReply::Ambiguous {
-                candidates: outcome.candidates,
-            })
-        }
-        crate::project_resolver::ResolveStatus::NotFound => {
-            Ok(OpenProjectReply::NotFound {
-                candidates: outcome.candidates,
-            })
-        }
+        crate::project_resolver::ResolveStatus::Ambiguous => Ok(OpenProjectReply::Ambiguous {
+            candidates: outcome.candidates,
+        }),
+        crate::project_resolver::ResolveStatus::NotFound => Ok(OpenProjectReply::NotFound {
+            candidates: outcome.candidates,
+        }),
     }
 }
 

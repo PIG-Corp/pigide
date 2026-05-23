@@ -11,7 +11,7 @@ import {
   signalLabel,
   useArchitectStore,
 } from "../state/architect";
-import { closeLeaf, splitLeaf } from "../layout/tree";
+import { closeLeaf, splitLeaf, replaceLeafId } from "../layout/tree";
 import type { Agent } from "../state/types";
 import { Maximize2, Minimize2, X, RowsIcon, ColumnsIcon } from "./icons";
 import { useTheme } from "../themes/useTheme";
@@ -72,6 +72,10 @@ function fromB64(b64: string): Uint8Array {
   return out;
 }
 
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 export function AgentTile({ agent, isFocused, isMaximized }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const bodyRef = useRef<HTMLDivElement | null>(null);
@@ -79,6 +83,7 @@ export function AgentTile({ agent, isFocused, isMaximized }: Props) {
   const fitRef = useRef<FitAddon | null>(null);
   const searchRef = useRef<SearchAddon | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const termDisposedRef = useRef(false);
   const setFocused = useStore((s) => s.setFocusedLeaf);
   const setMaximized = useStore((s) => s.setMaximized);
   const layout = useStore((s) => s.layout);
@@ -87,6 +92,7 @@ export function AgentTile({ agent, isFocused, isMaximized }: Props) {
   const removeAgent = useStore((s) => s.removeAgent);
   const upsertAgent = useStore((s) => s.upsertAgent);
   const pushToast = useStore((s) => s.pushToast);
+  const isDead = agent.status === "exited";
 
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -146,6 +152,7 @@ export function AgentTile({ agent, isFocused, isMaximized }: Props) {
 
     // ResizeObserver -> fit -> resize_agent.
     const ro = new ResizeObserver(() => {
+      if (termDisposedRef.current) return;
       try {
         fit.fit();
         const { cols, rows } = term;
@@ -205,6 +212,7 @@ export function AgentTile({ agent, isFocused, isMaximized }: Props) {
     return () => {
       disposed = true;
       cancelled = true;
+      termDisposedRef.current = true;
       onDataDisp.dispose();
       ro.disconnect();
       node.removeEventListener("mousedown", focusHandler);
@@ -284,12 +292,30 @@ export function AgentTile({ agent, isFocused, isMaximized }: Props) {
     if (currentId) ipc.updateLayout(currentId, next).catch(() => undefined);
   };
 
+  const respawn = async () => {
+    if (!currentId) return;
+    try {
+      const [a] = await ipc.spawnAgent(
+        currentId,
+        agent.agent_type as "kiro-cli" | "claude" | "opencode" | "devin" | "agy",
+        { autoLayout: false, cwd: agent.cwd },
+      );
+      removeAgent(agent.id);
+      upsertAgent(a);
+      const next = replaceLeafId(layout, agent.id, a.id);
+      setLayout(next);
+      await ipc.updateLayout(currentId, next);
+    } catch (err) {
+      pushToast({ text: `Respawn failed: ${err}`, kind: "error" });
+    }
+  };
+
   const split = async (dir: "h" | "v") => {
     if (!currentId) return;
     try {
       const [a] = await ipc.spawnAgent(
         currentId,
-        agent.agent_type as "kiro-cli" | "claude" | "aider" | "goose" | "opencode" | "devin",
+        agent.agent_type as "kiro-cli" | "claude" | "opencode" | "devin" | "agy",
         { autoLayout: false },
       );
       upsertAgent(a);
@@ -302,10 +328,10 @@ export function AgentTile({ agent, isFocused, isMaximized }: Props) {
   };
 
   const findNext = () => {
-    if (searchQuery) searchRef.current?.findNext(searchQuery);
+    if (searchQuery) searchRef.current?.findNext(escapeRegex(searchQuery));
   };
   const findPrev = () => {
-    if (searchQuery) searchRef.current?.findPrevious(searchQuery);
+    if (searchQuery) searchRef.current?.findPrevious(escapeRegex(searchQuery));
   };
 
   const onSearchKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -391,35 +417,44 @@ export function AgentTile({ agent, isFocused, isMaximized }: Props) {
 
   return (
     <div
-      className={`agent-tile ${isFocused ? "focused" : ""} ${dragOver ? "drag-over" : ""}`}
+      className={`agent-tile ${isFocused ? "focused" : ""} ${dragOver ? "drag-over" : ""} ${isDead ? "dead" : ""}`}
       onDragEnter={onDragEnter}
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
       onDrop={onDrop}
     >
       <div className="agent-tile-header">
-        <span className="badge">{agent.agent_type}</span>
+        <span
+          className={`status-dot tile-status-dot ${agentStatusClass(agent.status)}`}
+          aria-label={`status: ${agent.status}`}
+          title={agent.status}
+        />
+        <span className="chip chip--accent tile-tag">{agent.agent_type}</span>
+        {isDead && <span className="chip chip--neutral tile-tag-dead">exited</span>}
         <ArchitectBadge agentId={agent.id} />
         <AgentTitle agentId={agent.id} />
         <AgentIdChip id={agent.id} onCopy={(text) => {
           navigator.clipboard.writeText(text).catch(() => undefined);
           pushToast({ text: `Copied ${shortId(text)}`, kind: "info" });
         }} />
-        <button title="Split horizontally" onClick={() => split("h")}>
-          <RowsIcon size={12} />
-        </button>
-        <button title="Split vertically" onClick={() => split("v")}>
-          <ColumnsIcon size={12} />
-        </button>
-        <button
-          title={isMaximized ? "Restore" : "Maximize"}
-          onClick={() => setMaximized(isMaximized ? null : agent.id)}
-        >
-          {isMaximized ? <Minimize2 size={12} /> : <Maximize2 size={12} />}
-        </button>
-        <button title="Close" onClick={close}>
-          <X size={12} />
-        </button>
+        <div className="tile-actions">
+          <button className="btn--icon" title="Split horizontally" onClick={() => split("h")}>
+            <RowsIcon size={12} />
+          </button>
+          <button className="btn--icon" title="Split vertically" onClick={() => split("v")}>
+            <ColumnsIcon size={12} />
+          </button>
+          <button
+            className="btn--icon"
+            title={isMaximized ? "Restore" : "Maximize"}
+            onClick={() => setMaximized(isMaximized ? null : agent.id)}
+          >
+            {isMaximized ? <Minimize2 size={12} /> : <Maximize2 size={12} />}
+          </button>
+          <button className="btn--icon" title="Close" onClick={close}>
+            <X size={12} />
+          </button>
+        </div>
       </div>
       <CommandBlocksBar blocks={blocks} />
       <div
@@ -432,6 +467,15 @@ export function AgentTile({ agent, isFocused, isMaximized }: Props) {
         }}
       >
         <div ref={containerRef} style={{ width: "100%", height: "100%" }} />
+        {isDead && (
+          <div className="agent-tile-dead-overlay">
+            <div className="agent-tile-dead-msg">
+              <p>Process exited</p>
+              <button onClick={respawn}>Respawn</button>
+              <button onClick={close}>Remove</button>
+            </div>
+          </div>
+        )}
         {searchOpen && (
           <div className="agent-tile-search" onClick={(e) => e.stopPropagation()}>
             <input
@@ -480,6 +524,30 @@ export function AgentTile({ agent, isFocused, isMaximized }: Props) {
 
 function shortId(id: string): string {
   return id.slice(0, 8);
+}
+
+// Map agent runtime status to the §2 status-dot vocabulary.
+function agentStatusClass(status: string): string {
+  switch (status) {
+    case "running":
+    case "ok":
+    case "healthy":
+      return "running";
+    case "exited":
+    case "stopped":
+    case "dead":
+      return "exited";
+    case "error":
+    case "failed":
+    case "crashed":
+      return "error";
+    case "streaming":
+    case "busy":
+    case "thinking":
+      return "streaming";
+    default:
+      return "idle";
+  }
 }
 
 const TASK_PRIORITY: Record<TaskStatus, number> = {

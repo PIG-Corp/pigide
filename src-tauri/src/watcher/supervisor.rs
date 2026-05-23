@@ -16,9 +16,7 @@ use crate::agent::AgentManager;
 use crate::db::DbPool;
 use crate::events::EV_AGENT_STDOUT;
 use crate::swarm::mailbox;
-use crate::watcher::classifier::{
-    classify_chunk, ClassifierKind, GeminiClient,
-};
+use crate::watcher::classifier::{classify_chunk, ClassifierKind, GeminiClient};
 use crate::watcher::rate_limiter::TokenBucket;
 use base64::Engine;
 use parking_lot::RwLock;
@@ -147,8 +145,8 @@ impl Watcher {
             let blocked_until = if blocked.is_zero() {
                 None
             } else {
-                let when = chrono::Utc::now()
-                    + chrono::Duration::milliseconds(blocked.as_millis() as i64);
+                let when =
+                    chrono::Utc::now() + chrono::Duration::milliseconds(blocked.as_millis() as i64);
                 Some(when.to_rfc3339())
             };
             agents.insert(
@@ -245,13 +243,8 @@ impl Watcher {
         })
         .to_string();
         let thread_id = format!("watcher:{}", agent_id);
-        if let Err(e) = mailbox::send(
-            &self.db,
-            None,
-            "role:coordinator",
-            &body,
-            Some(&thread_id),
-        ) {
+        if let Err(e) = mailbox::send_system(&self.db, "role:coordinator", &body, Some(&thread_id))
+        {
             tracing::warn!(agent = %agent_id, "watcher escalate mail: {}", e);
             return;
         }
@@ -270,13 +263,7 @@ impl Watcher {
     /// Drain Coordinator replies on every `watcher:<agent_id>` thread that
     /// is currently open. Public for tests.
     pub fn drain_replies(&self) {
-        let agents: Vec<String> = self
-            .inner
-            .read()
-            .open_threads
-            .keys()
-            .cloned()
-            .collect();
+        let agents: Vec<String> = self.inner.read().open_threads.keys().cloned().collect();
         for agent_id in agents {
             let thread_id = format!("watcher:{}", agent_id);
             let mails = match mailbox::list_thread(&self.db, &thread_id) {

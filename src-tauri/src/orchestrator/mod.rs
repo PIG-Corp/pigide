@@ -11,7 +11,6 @@ use crate::db::{self, DbPool};
 use crate::error::Result;
 use crate::events::{EV_CHAT_CHUNK, EV_CHAT_MESSAGE, EV_CHAT_STATUS};
 use crate::memory::MemoryService;
-use crate::path_suggest::{self, Attachment};
 use crate::project_resolver::ResolverService;
 use crate::skills::router::{route, RouterConfig, RouterMode};
 use crate::skills::{compose_system_prompt, SkillRegistry};
@@ -22,48 +21,11 @@ use prompt::SYSTEM_PROMPT_BASE;
 use providers::{ChatRequest, LlmProvider};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter};
-use tokio::sync::Notify;
 
 const HISTORY_LIMIT: i64 = 60;
 const MAX_ITERATIONS: usize = 6;
-
-/// Per-turn cancellation handle. A fresh one is installed at the start of
-/// each `run_chat_with_attachments` call and lives in
-/// `Orchestrator::current_cancel` for the duration of the turn. The
-/// `stop_chat` Tauri command flips `flag` and pings `notify`, which wakes
-/// any `select!` arm waiting on it and lets the tool loop check the flag
-/// at every step boundary.
-#[derive(Clone)]
-struct CancelHandle {
-    flag: Arc<AtomicBool>,
-    notify: Arc<Notify>,
-}
-
-impl CancelHandle {
-    fn new() -> Self {
-        Self {
-            flag: Arc::new(AtomicBool::new(false)),
-            notify: Arc::new(Notify::new()),
-        }
-    }
-    fn cancel(&self) {
-        self.flag.store(true, Ordering::SeqCst);
-        self.notify.notify_waiters();
-    }
-    fn is_cancelled(&self) -> bool {
-        self.flag.load(Ordering::SeqCst)
-    }
-    async fn wait(&self) {
-        // Wake immediately if the flag was already raised before we got here.
-        if self.is_cancelled() {
-            return;
-        }
-        self.notify.notified().await;
-    }
-}
 
 pub struct Orchestrator {
     db: DbPool,
@@ -74,16 +36,6 @@ pub struct Orchestrator {
     skills: Arc<SkillRegistry>,
     resolver: Arc<ResolverService>,
     app: RwLock<Option<AppHandle>>,
-    /// `@`-mention attachments for the current turn. Set by
-    /// `run_chat_with_attachments` before the tool loop spins up; cleared
-    /// at the end of the turn. The dynamic system-prompt builder reads
-    /// this and surfaces the entries in `[WORLD STATE]`.
-    turn_attachments: RwLock<Vec<Attachment>>,
-    /// Active cancellation handle for the in-flight turn (if any). The
-    /// `stop_chat` command reads this and triggers the cancel; the
-    /// orchestrator installs/removes it at the boundaries of
-    /// `run_chat_with_attachments`.
-    current_cancel: RwLock<Option<CancelHandle>>,
 }
 
 impl Orchestrator {
@@ -105,8 +57,6 @@ impl Orchestrator {
             skills,
             resolver,
             app: RwLock::new(None),
-            turn_attachments: RwLock::new(Vec::new()),
-            current_cancel: RwLock::new(None),
         }
     }
 
@@ -220,12 +170,6 @@ impl Orchestrator {
                 }
             }
         }
-
-        // @-mention attachments the user pinned for THIS turn.
-        let turn_attachments = self.turn_attachments.read().clone();
-        if !turn_attachments.is_empty() {
-            s.push_str(&path_suggest::render_world_state(&turn_attachments));
-        }
         s
     }
 
@@ -257,19 +201,6 @@ impl Orchestrator {
         }
         out.push_str("Use [[wikilinks]] to reference these in your reply.\n");
         Some(out)
-    }
-
-    /// Read `orchestrator.max_phantom_retries` from settings, falling
-    /// back to [`phantom::DEFAULT_MAX_PHANTOM_RETRIES`]. Clamped to a
-    /// sane upper bound so a typo can't turn the loop into a phantom
-    /// retry storm.
-    fn max_phantom_retries(&self) -> u32 {
-        let from_settings = db::get_setting(&self.db, "orchestrator.max_phantom_retries")
-            .ok()
-            .flatten()
-            .and_then(|v| v.trim().parse::<u32>().ok());
-        let n = from_settings.unwrap_or(phantom::DEFAULT_MAX_PHANTOM_RETRIES);
-        n.min(5)
     }
 
     fn build_messages(
@@ -357,44 +288,6 @@ impl Orchestrator {
     /// Run a chat turn: persist user message, call the active provider,
     /// dispatch tool calls, persist + emit each step.
     pub async fn run_chat(self: Arc<Self>, text: String) -> Result<()> {
-        self.run_chat_with_attachments(text, Vec::new()).await
-    }
-
-    /// Same as `run_chat`, but with `@`-mention attachments pinned for
-    /// the duration of THIS turn. The attachments live in
-    /// `Orchestrator::turn_attachments` for the entire tool-loop so each
-    /// iteration's `[WORLD STATE]` block surfaces them — and are cleared
-    /// before the function returns.
-    pub async fn run_chat_with_attachments(
-        self: Arc<Self>,
-        text: String,
-        attachments: Vec<Attachment>,
-    ) -> Result<()> {
-        // Stash attachments where `build_system_prompt` can see them.
-        // We hold the slot for the duration of the turn and clear it on
-        // every exit path (success, error, panic-via-drop) via the
-        // RAII guard below.
-        struct AttachGuard(Arc<Orchestrator>);
-        impl Drop for AttachGuard {
-            fn drop(&mut self) {
-                self.0.turn_attachments.write().clear();
-            }
-        }
-        *self.turn_attachments.write() = attachments;
-        let _guard = AttachGuard(self.clone());
-
-        // Install a fresh cancel handle for this turn. RAII'd off via
-        // CancelGuard so any early return (Err, panic) clears the slot.
-        struct CancelGuard(Arc<Orchestrator>);
-        impl Drop for CancelGuard {
-            fn drop(&mut self) {
-                self.0.current_cancel.write().take();
-            }
-        }
-        let cancel = CancelHandle::new();
-        *self.current_cancel.write() = Some(cancel.clone());
-        let _cancel_guard = CancelGuard(self.clone());
-
         let session_id = chat_sessions::ensure_current(&self.db)?;
         let user_msg = ChatMessage::user(session_id.clone(), text);
         chat::insert(&self.db, &user_msg)?;
@@ -406,9 +299,7 @@ impl Orchestrator {
         let tools = tools::tool_definitions();
         let user_created_at = user_msg.created_at.clone();
 
-        let result = self
-            .tool_loop(provider.as_ref(), &tools, &session_id, &cancel)
-            .await;
+        let result = self.tool_loop(provider.as_ref(), &tools, &session_id).await;
         if let Err(e) = result {
             // Roll back any partial assistant/tool messages so the next
             // request doesn't replay an inconsistent history.
@@ -417,27 +308,8 @@ impl Orchestrator {
             let _ = chat::insert(&self.db, &m);
             self.emit_message(&m);
         }
-        if cancel.is_cancelled() {
-            let m = ChatMessage::system(
-                session_id.clone(),
-                "(остановлено пользователем)".to_string(),
-            );
-            let _ = chat::insert(&self.db, &m);
-            self.emit_message(&m);
-        }
         self.emit_status("idle");
         Ok(())
-    }
-
-    /// Cancel the in-flight turn, if any. Idempotent — calling on an idle
-    /// orchestrator is a no-op. Returns `true` if a turn was actually
-    /// signalled.
-    pub fn stop(&self) -> bool {
-        if let Some(c) = self.current_cancel.read().as_ref() {
-            c.cancel();
-            return true;
-        }
-        false
     }
 
     /// Wipe orchestrator chat history for one session.
@@ -451,7 +323,6 @@ impl Orchestrator {
         provider: &dyn LlmProvider,
         tools: &[Value],
         session_id: &str,
-        cancel: &CancelHandle,
     ) -> Result<()> {
         // The latest user message anchors memory auto-injection.
         let last_user_text = chat::list(&self.db, session_id, HISTORY_LIMIT)?
@@ -460,20 +331,14 @@ impl Orchestrator {
             .find(|m| m.role == "user")
             .map(|m| m.content);
 
-        // Phantom-tool-call retry counter. Up to `max_phantom_retries`
-        // re-prompts per user turn; each detection bumps the counter and
-        // the next iteration is built with `phantom_nag=true`. After the
-        // cap is hit on a still-failing turn, we surface a visible
-        // warning and stop.
-        let max_phantom_retries = self.max_phantom_retries();
+        // Phantom-tool-call retry latch. We allow at most ONE re-prompt
+        // per user turn: once a phantom is detected, the next iteration
+        // builds the message list with `phantom_nag=true`. After that
+        // turn we either resolved (got a tool_call) or warn the user.
         let mut phantom_nag = false;
-        let mut phantom_attempts: u32 = 0;
         let mut phantom_pending: Option<String> = None;
 
         for iter in 0..MAX_ITERATIONS {
-            if cancel.is_cancelled() {
-                return Ok(());
-            }
             // 1. Build a fresh message list (history may have grown via prior
             //    iterations — each tool result becomes a [Tool result] user msg).
             let messages =
@@ -490,10 +355,7 @@ impl Orchestrator {
             // 3. Stream the model response via the active provider.
             // Each text delta arrives via mpsc and is forwarded to the UI as
             // a `chat://chunk` event. Streaming runs concurrently with the
-            // provider future so the UI updates incrementally. If the user
-            // hits Stop mid-stream, `cancel.wait()` wakes up and we drop
-            // the provider future — that aborts the underlying reqwest
-            // stream because the bytes_stream is consumed inside it.
+            // provider future so the UI updates incrementally.
             let app = self.app.read().clone();
             let id_for_cb = placeholder_id.clone();
             let req = self.build_request(provider, messages, tools.to_vec());
@@ -509,19 +371,7 @@ impl Orchestrator {
                     }
                 }
             });
-            let stream_fut = provider.chat_stream(req, delta_tx);
-            let stream_result = tokio::select! {
-                biased;
-                _ = cancel.wait() => {
-                    // Drop the stream future — this ends the SSE read and
-                    // releases the http connection. The forwarder task
-                    // also drains and exits because delta_tx is dropped.
-                    let _ = forwarder.await;
-                    let _ = chat::delete_after(&self.db, session_id, &placeholder.created_at);
-                    return Ok(());
-                }
-                r = stream_fut => r,
-            };
+            let stream_result = provider.chat_stream(req, delta_tx).await;
             let _ = forwarder.await;
             let assembled = match stream_result {
                 Ok(m) => m,
@@ -530,14 +380,6 @@ impl Orchestrator {
                     return Err(e);
                 }
             };
-
-            // Cancellation could land between stream completion and tool
-            // dispatch — bail before persisting the assistant frame so we
-            // don't leave a half-saved turn behind.
-            if cancel.is_cancelled() {
-                let _ = chat::delete_after(&self.db, session_id, &placeholder.created_at);
-                return Ok(());
-            }
 
             let final_text = assembled.content.clone().unwrap_or_default();
             let has_tools = assembled
@@ -562,77 +404,51 @@ impl Orchestrator {
             // 4b. Phantom-tool-call detection.
             //
             // The model narrated an action ("I'll send to agent",
-            // "Calling tools:", "сейчас вызову X") but emitted no
-            // tool_calls. Re-prompt up to `max_phantom_retries` times
-            // with a hard nag; if the cap is hit on a still-failing
-            // turn, surface a visible warning to the user.
+            // "сейчас вызову X") but emitted no tool_calls. Re-prompt
+            // once with a hard nag; if the SECOND attempt also fails,
+            // surface a visible warning to the user.
             let is_phantom = phantom::is_phantom(&final_text, has_tools);
-            if is_phantom && phantom_attempts < max_phantom_retries {
-                // Detection — log, bump counter, latch the nag, loop again.
-                phantom_attempts += 1;
+            if is_phantom && !phantom_nag {
+                // First detection — log, latch, and loop again with the nag.
                 let model = provider.primary_model().to_string();
                 let ws_path = self.current_workspace_path().unwrap_or_default();
                 phantom::append_event(
                     &phantom::resolve_log_root(Some(&ws_path)),
-                    &phantom::PhantomEvent::new(
-                        &model,
-                        &final_text,
-                        phantom_attempts.saturating_sub(1),
-                        false,
-                    ),
+                    &phantom::PhantomEvent::new(&model, &final_text, false, false),
                 );
                 tracing::warn!(
                     target: "orchestrator::phantom",
-                    attempt = phantom_attempts,
-                    cap = max_phantom_retries,
-                    pattern = ?phantom::matched_pattern(&final_text),
-                    "phantom tool_call detected, re-prompting: {:?}",
-                    final_text.chars().take(200).collect::<String>()
+                    "phantom tool_call detected, re-prompting once: {:?}",
+                    final_text.chars().take(120).collect::<String>()
                 );
                 phantom_nag = true;
                 phantom_pending = Some(final_text.clone());
                 continue;
             }
             if phantom_nag {
-                // We were in retry mode this iteration. Record outcome.
+                // We were in retry mode. Record the outcome.
                 let model = provider.primary_model().to_string();
                 let ws_path = self.current_workspace_path().unwrap_or_default();
                 let resolved = !is_phantom;
                 let snippet = phantom_pending.take().unwrap_or_default();
                 phantom::append_event(
                     &phantom::resolve_log_root(Some(&ws_path)),
-                    &phantom::PhantomEvent::new(
-                        &model,
-                        &snippet,
-                        phantom_attempts,
-                        resolved,
-                    ),
+                    &phantom::PhantomEvent::new(&model, &snippet, true, resolved),
                 );
                 phantom_nag = false;
                 if !resolved {
-                    // Cap exhausted and the model still narrates — warn
-                    // the user and stop the turn.
-                    tracing::warn!(
-                        target: "orchestrator::phantom",
-                        attempts = phantom_attempts,
-                        "phantom retries exhausted; surfacing warning"
-                    );
+                    // Second failure — warn the user and stop the turn.
                     let warn = ChatMessage::system(
                         session_id.to_string(),
-                        format!(
-                            "warning: model described a tool call but did \
-                             not emit one (phantom tool_call) after {} \
-                             retr{}. The action did not execute. Try \
-                             rephrasing your request.",
-                            phantom_attempts,
-                            if phantom_attempts == 1 { "y" } else { "ies" }
-                        ),
+                        "warning: model described a tool call but did not emit \
+                         one (phantom tool_call). The action did not execute. \
+                         Try rephrasing your request."
+                            .to_string(),
                     );
                     chat::insert(&self.db, &warn)?;
                     self.emit_message(&warn);
                     return Ok(());
                 }
-                phantom_attempts = 0;
                 // else fall through — model recovered, treat normally.
             }
 
@@ -643,14 +459,9 @@ impl Orchestrator {
 
             // 5. Execute tool_calls; persist each as a tool message in DB so
             //    next iteration's build_messages can transform it into a
-            //    [Tool result] user message for the model. Cancellation
-            //    is checked between every call so any tool_call still
-            //    queued at the moment of Stop never fires.
+            //    [Tool result] user message for the model.
             self.emit_status("tool");
             for call in assembled.tool_calls.unwrap_or_default() {
-                if cancel.is_cancelled() {
-                    return Ok(());
-                }
                 let args: Value = serde_json::from_str(&call.function.arguments)
                     .unwrap_or_else(|_| Value::Object(Default::default()));
                 let app_handle = self.app.read().clone();
@@ -728,7 +539,7 @@ impl Orchestrator {
         let mode = db::get_setting(&self.db, "skills.router.mode")
             .ok()
             .flatten()
-            .map(|v| RouterMode::from_str(&v))
+            .map(|v| RouterMode::parse(&v))
             .unwrap_or_default();
         let max_skills = db::get_setting(&self.db, "skills.router.max_skills")
             .ok()

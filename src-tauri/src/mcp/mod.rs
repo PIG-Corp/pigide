@@ -6,8 +6,8 @@
 //!
 //! Transport: a single `POST /mcp` endpoint that accepts standard MCP JSON-RPC
 //! messages (`tools/list`, `tools/call`, `prompts/list`, `prompts/get`,
-//! `initialize`). Bearer authentication via `Authorization` header or
-//! `?apiKey=` query, scoped per key.
+//! `initialize`). Bearer authentication via `Authorization` header, scoped per
+//! key.
 
 pub mod auth;
 pub mod launcher;

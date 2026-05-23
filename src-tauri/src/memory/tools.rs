@@ -154,10 +154,7 @@ pub async fn dispatch(
         }
         "update_memory" => {
             let id = arg_str(args, "id")?.to_string();
-            let title = args
-                .get("title")
-                .and_then(|v| v.as_str())
-                .map(String::from);
+            let title = args.get("title").and_then(|v| v.as_str()).map(String::from);
             let body = args.get("body").and_then(|v| v.as_str()).map(String::from);
             let tags = args.get("tags").and_then(|v| v.as_array()).map(|a| {
                 a.iter()

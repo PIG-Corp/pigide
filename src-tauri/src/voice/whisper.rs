@@ -56,10 +56,7 @@ impl Whisper {
             params.use_gpu(true);
             match WhisperContext::new_with_params(path, params) {
                 Ok(ctx) => {
-                    tracing::info!(
-                        "whisper: GPU backend initialized (model={})",
-                        model_id
-                    );
+                    tracing::info!("whisper: GPU backend initialized (model={})", model_id);
                     return Ok(Self {
                         ctx,
                         model_id: model_id.to_string(),
@@ -67,16 +64,11 @@ impl Whisper {
                     });
                 }
                 Err(e) => {
-                    tracing::warn!(
-                        "whisper: GPU init failed, falling back to CPU: {}",
-                        e
-                    );
+                    tracing::warn!("whisper: GPU init failed, falling back to CPU: {}", e);
                 }
             }
         } else if !GPU_COMPILED_IN {
-            tracing::info!(
-                "whisper: CPU backend (binary built without gpu-* feature)"
-            );
+            tracing::info!("whisper: CPU backend (binary built without gpu-* feature)");
         } else {
             tracing::info!("whisper: CPU backend (PIGIDE_WHISPER_CPU set)");
         }

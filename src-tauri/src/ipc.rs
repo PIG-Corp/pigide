@@ -15,6 +15,8 @@ use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 
 #[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
+#[cfg(unix)]
 use std::os::unix::net::{UnixListener, UnixStream};
 
 #[derive(Debug, Clone, Deserialize)]
@@ -134,6 +136,10 @@ pub fn spawn(db: DbPool) {
             return;
         }
     };
+    if let Err(e) = restrict_socket_permissions(&path) {
+        tracing::warn!("ipc chmod {} failed: {}", path.display(), e);
+        return;
+    }
     tracing::info!("ipc listening on {}", path.display());
     let path_for_thread = path.clone();
     std::thread::spawn(move || {
@@ -151,6 +157,11 @@ pub fn spawn(db: DbPool) {
     });
 }
 
+#[cfg(unix)]
+fn restrict_socket_permissions(path: &Path) -> std::io::Result<()> {
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+}
+
 #[cfg(not(unix))]
 pub fn spawn(_db: DbPool) {
     tracing::info!("ipc socket: not supported on this platform");
@@ -160,6 +171,7 @@ pub fn spawn(_db: DbPool) {
 mod tests {
     use super::*;
     use r2d2_sqlite::SqliteConnectionManager;
+    use std::os::unix::fs::PermissionsExt;
 
     fn pool() -> DbPool {
         let manager = SqliteConnectionManager::memory();
@@ -232,6 +244,17 @@ mod tests {
             Response::Error { .. } => {}
             other => panic!("got {:?}", other),
         }
+    }
+
+    #[test]
+    fn restrict_socket_permissions_sets_owner_only_mode() {
+        let dir = tempdir_for_test("pigide-ipc-perms");
+        let path = dir.join("sock");
+        std::fs::write(&path, b"x").unwrap();
+        restrict_socket_permissions(&path).unwrap();
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+        std::fs::remove_dir_all(dir).ok();
     }
 
     fn tempdir_for_test(label: &str) -> PathBuf {

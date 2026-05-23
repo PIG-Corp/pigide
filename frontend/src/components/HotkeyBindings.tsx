@@ -63,6 +63,7 @@ export function HotkeyBindings(): null {
       if (!ws) return;
       if (ws.id === state.currentId) return;
       try {
+        state.clearWorkspaceState();
         await ipc.setCurrentWorkspace(ws.id);
         // Backend doesn't emit workspace://changed for set_current; pull
         // the new state ourselves.
@@ -71,6 +72,8 @@ export function HotkeyBindings(): null {
         state.setLayout(fresh.layout);
         const agents = await ipc.listAgents(ws.id);
         state.setAgents(agents);
+        const tasks = await ipc.listTasks({ workspace_id: ws.id });
+        state.setTasks(tasks);
       } catch (err) {
         state.pushToast({
           text: `Failed to switch workspace: ${err}`,
@@ -92,8 +95,10 @@ export function HotkeyBindings(): null {
     };
 
     const bindings: HotkeyMap = {
-      "ctrl+t": newWorkspace,
-      "ctrl+w": closeFocusedTile,
+      // ctrl+t (new browser tab) and ctrl+w (close tab) are intentionally
+      // omitted — they hijack standard browser/OS shortcuts (U-92 / H-35).
+      "ctrl+shift+n": newWorkspace,
+      "ctrl+shift+w": () => { void closeFocusedTile(); },
       "ctrl+shift+d": () => splitFocused("h"),
       "ctrl+shift+s": () => splitFocused("v"),
       "ctrl+k": toggleKanban,

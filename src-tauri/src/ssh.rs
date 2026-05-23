@@ -226,21 +226,40 @@ mod tests {
     #[test]
     fn duplicate_name_rejected() {
         let p = pool();
-        create(&p, CreatePresetArgs { name: "x".into(), host: "h".into(), ..Default::default() }).unwrap();
-        let err = create(&p, CreatePresetArgs { name: "x".into(), host: "h2".into(), ..Default::default() }).unwrap_err();
+        create(
+            &p,
+            CreatePresetArgs {
+                name: "x".into(),
+                host: "h".into(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let err = create(
+            &p,
+            CreatePresetArgs {
+                name: "x".into(),
+                host: "h2".into(),
+                ..Default::default()
+            },
+        )
+        .unwrap_err();
         assert!(matches!(err, Error::Invalid(_)));
     }
 
     #[test]
     fn build_argv_with_user_and_port() {
         let preset = SshPreset {
-            id: "1".into(), name: "p".into(),
-            host: "ex.com".into(), user: Some("deploy".into()),
+            id: "1".into(),
+            name: "p".into(),
+            host: "ex.com".into(),
+            user: Some("deploy".into()),
             port: Some(2222),
             identity: Some("/k".into()),
             args: vec!["-L".into(), "8080:localhost:80".into()],
             cwd: None,
-            created_at: "".into(), updated_at: "".into(),
+            created_at: "".into(),
+            updated_at: "".into(),
         };
         let argv = build_argv(&preset);
         assert_eq!(
@@ -260,10 +279,16 @@ mod tests {
     #[test]
     fn build_argv_without_user_and_port() {
         let preset = SshPreset {
-            id: "1".into(), name: "p".into(),
-            host: "ex.com".into(), user: None,
-            port: None, identity: None, args: vec![],
-            cwd: None, created_at: "".into(), updated_at: "".into(),
+            id: "1".into(),
+            name: "p".into(),
+            host: "ex.com".into(),
+            user: None,
+            port: None,
+            identity: None,
+            args: vec![],
+            cwd: None,
+            created_at: "".into(),
+            updated_at: "".into(),
         };
         let argv = build_argv(&preset);
         assert_eq!(argv, vec!["ex.com".to_string()]);
@@ -273,11 +298,27 @@ mod tests {
     fn empty_name_or_host_rejected() {
         let p = pool();
         assert!(matches!(
-            create(&p, CreatePresetArgs { name: "".into(), host: "h".into(), ..Default::default() }).unwrap_err(),
+            create(
+                &p,
+                CreatePresetArgs {
+                    name: "".into(),
+                    host: "h".into(),
+                    ..Default::default()
+                }
+            )
+            .unwrap_err(),
             Error::Invalid(_)
         ));
         assert!(matches!(
-            create(&p, CreatePresetArgs { name: "n".into(), host: "".into(), ..Default::default() }).unwrap_err(),
+            create(
+                &p,
+                CreatePresetArgs {
+                    name: "n".into(),
+                    host: "".into(),
+                    ..Default::default()
+                }
+            )
+            .unwrap_err(),
             Error::Invalid(_)
         ));
     }

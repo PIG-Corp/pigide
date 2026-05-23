@@ -8,16 +8,19 @@ export function TransmissionLog() {
       <button
         className="transmission-log__tab"
         onClick={() => setOpen(!open)}
+        aria-expanded={open}
+        aria-controls="transmission-log-drawer"
       >
         Transmission log
       </button>
       {open && (
-        <div className="transmission-log__drawer">
+        <div className="transmission-log__drawer" id="transmission-log-drawer" role="region" aria-label="Transmission log">
           <div className="transmission-log__drawer-header">
             <span>Transmission log</span>
             <button
               className="transmission-log__close"
               onClick={() => setOpen(false)}
+              aria-label="Close transmission log"
             >
               ✕
             </button>

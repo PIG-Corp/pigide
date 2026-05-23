@@ -34,6 +34,12 @@ jobs:
       - name: cargo clippy
         run: cargo clippy --all-targets -- -D warnings
         working-directory: src-tauri
+      - name: cargo audit
+        run: |
+          cargo install cargo-audit --locked
+          cargo audit
+        working-directory: src-tauri
+        continue-on-error: true
       - name: cargo test
         run: cargo test --lib
         working-directory: src-tauri

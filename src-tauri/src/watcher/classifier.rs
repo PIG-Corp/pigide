@@ -222,8 +222,8 @@ impl GeminiClient {
     /// if the API key is unset or empty — the supervisor logs a single
     /// warning and disables itself rather than retrying a broken config.
     pub fn from_env() -> Result<Self, String> {
-        let key = std::env::var("GEMINI_API_KEY")
-            .map_err(|_| "GEMINI_API_KEY not set".to_string())?;
+        let key =
+            std::env::var("GEMINI_API_KEY").map_err(|_| "GEMINI_API_KEY not set".to_string())?;
         if key.trim().is_empty() {
             return Err("GEMINI_API_KEY empty".to_string());
         }
@@ -315,10 +315,7 @@ impl GeminiClient {
 
 /// One-shot convenience: classify `chunk` with the given client. Errors are
 /// already redacted.
-pub async fn classify_chunk(
-    client: &GeminiClient,
-    chunk: &str,
-) -> Result<Classification, String> {
+pub async fn classify_chunk(client: &GeminiClient, chunk: &str) -> Result<Classification, String> {
     let raw = client.generate(chunk).await?;
     parse_classification(&raw)
 }

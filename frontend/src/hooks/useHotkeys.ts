@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 
 export type HotkeyHandler = (e: KeyboardEvent) => void;
 export type HotkeyMap = Record<string, HotkeyHandler>;
@@ -74,12 +74,18 @@ function isEditableTarget(target: EventTarget | null): boolean {
 }
 
 export function useHotkeys(map: HotkeyMap): void {
+  // U-91 / H-33: keep a ref to the latest map so the listener closure always
+  // sees current handlers without needing to re-attach on every render.
+  const mapRef = useRef(map);
+  mapRef.current = map;
+
+  // Stable dependency: only re-attach when the set of bound keys changes.
+  const keysSignature = Object.keys(map).sort().join(",");
+
   useEffect(() => {
-    const compiled: { spec: string; parsed: ParsedHotkey; handler: HotkeyHandler }[] = [];
-    for (const spec of Object.keys(map)) {
-      const handler = map[spec];
-      if (!handler) continue;
-      compiled.push({ spec, parsed: parseHotkey(spec), handler });
+    const compiled: { spec: string; parsed: ParsedHotkey }[] = [];
+    for (const spec of Object.keys(mapRef.current)) {
+      compiled.push({ spec, parsed: parseHotkey(spec) });
     }
 
     const onKeyDown = (e: KeyboardEvent) => {
@@ -89,9 +95,11 @@ export function useHotkeys(map: HotkeyMap): void {
         // Skip when typing in an editable element unless the hotkey requires Shift
         // (we use Shift as the "force-fire-even-in-input" convention).
         if (editable && !c.parsed.shift) continue;
+        const handler = mapRef.current[c.spec];
+        if (!handler) continue;
         e.preventDefault();
         e.stopPropagation();
-        c.handler(e);
+        handler(e);
         return;
       }
     };
@@ -100,5 +108,6 @@ export function useHotkeys(map: HotkeyMap): void {
     return () => {
       document.body.removeEventListener("keydown", onKeyDown);
     };
-  }, [map]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [keysSignature]);
 }

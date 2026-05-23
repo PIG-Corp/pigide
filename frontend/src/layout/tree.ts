@@ -116,6 +116,25 @@ export function setRatioAt(
   return { ...tree, b: setRatioAt(tree.b, rest, ratio) };
 }
 
+/**
+ * Replace a leaf's agentId with a new one (used by respawn to swap dead→new).
+ */
+export function replaceLeafId(
+  tree: LayoutNode,
+  oldId: string,
+  newId: string,
+): LayoutNode {
+  switch (tree.type) {
+    case "empty": return tree;
+    case "leaf": return tree.agentId === oldId ? { type: "leaf", agentId: newId } : tree;
+    case "split": return {
+      ...tree,
+      a: replaceLeafId(tree.a, oldId, newId),
+      b: replaceLeafId(tree.b, oldId, newId),
+    };
+  }
+}
+
 /** Serialize-safe deep clone (we deal in plain JSON). */
 export function clone<T>(v: T): T {
   return JSON.parse(JSON.stringify(v));

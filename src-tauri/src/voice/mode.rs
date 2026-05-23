@@ -32,9 +32,7 @@ impl RecordMode {
     /// with the serde kebab-case form and a couple of common variants.
     pub fn parse(value: &str) -> Option<Self> {
         match value.trim().to_ascii_lowercase().as_str() {
-            "ptt" | "push-to-talk" | "push_to_talk" | "pushtotalk" => {
-                Some(Self::PushToTalk)
-            }
+            "ptt" | "push-to-talk" | "push_to_talk" | "pushtotalk" => Some(Self::PushToTalk),
             "toggle" => Some(Self::Toggle),
             _ => None,
         }

@@ -5,7 +5,7 @@
 //! - **Wayland / fallback**: clipboard + Ctrl+V (через arboard + enigo).
 //! - **macOS**: clipboard + Cmd+V (требует Accessibility permission).
 
-use crate::db::{DbPool, get_setting, set_setting};
+use crate::db::{get_setting, set_setting, DbPool};
 use crate::error::{Error, Result};
 
 const SETTING_KEY: &str = "voice.inject_enabled";
@@ -74,8 +74,8 @@ fn is_wayland() -> bool {
 fn try_direct_type(text: &str) -> Result<()> {
     use enigo::{Enigo, Keyboard, Settings};
 
-    let mut enigo = Enigo::new(&Settings::default())
-        .map_err(|e| Error::Voice(format!("enigo init: {}", e)))?;
+    let mut enigo =
+        Enigo::new(&Settings::default()).map_err(|e| Error::Voice(format!("enigo init: {}", e)))?;
     enigo
         .text(text)
         .map_err(|e| Error::Voice(format!("enigo.text: {}", e)))?;
@@ -85,8 +85,7 @@ fn try_direct_type(text: &str) -> Result<()> {
 fn paste_via_clipboard(text: &str) -> Result<()> {
     use arboard::Clipboard;
 
-    let mut cb =
-        Clipboard::new().map_err(|e| Error::Voice(format!("clipboard init: {}", e)))?;
+    let mut cb = Clipboard::new().map_err(|e| Error::Voice(format!("clipboard init: {}", e)))?;
 
     // Сохранить старое содержимое (если оно было текстом).
     let previous = cb.get_text().ok();
@@ -126,8 +125,8 @@ fn press_paste() -> Result<()> {
         Enigo, Key, Keyboard, Settings,
     };
 
-    let mut enigo = Enigo::new(&Settings::default())
-        .map_err(|e| Error::Voice(format!("enigo init: {}", e)))?;
+    let mut enigo =
+        Enigo::new(&Settings::default()).map_err(|e| Error::Voice(format!("enigo init: {}", e)))?;
 
     let modifier = if cfg!(target_os = "macos") {
         Key::Meta

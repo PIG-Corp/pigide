@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ipc,
   onSkillsError,
@@ -32,6 +32,7 @@ export function SkillsPanel() {
   const [createName, setCreateName] = useState("");
   const [importing, setImporting] = useState(false);
   const [lastImport, setLastImport] = useState<ClaudeImportReport | null>(null);
+  const pendingToggles = useRef<Set<string>>(new Set());
 
   async function refresh() {
     try {
@@ -82,12 +83,16 @@ export function SkillsPanel() {
   }, [list]);
 
   async function toggle(s: SkillView) {
+    if (pendingToggles.current.has(s.id)) return;
     const wantEnabled = !(s.enabled && !s.override_disabled);
+    pendingToggles.current.add(s.id);
     try {
       await ipc.setSkillEnabled(s.id, wantEnabled);
       await refresh();
     } catch (e) {
       pushToast({ kind: "error", text: String(e) });
+    } finally {
+      pendingToggles.current.delete(s.id);
     }
   }
 
@@ -198,6 +203,16 @@ export function SkillsPanel() {
                       e.stopPropagation();
                       toggle(s);
                     }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        toggle(s);
+                      }
+                    }}
+                    role="switch"
+                    aria-checked={s.enabled && !s.override_disabled}
+                    tabIndex={0}
                     title="Click to toggle"
                   >
                     {s.enabled && !s.override_disabled ? "ON" : "OFF"}

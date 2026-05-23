@@ -110,7 +110,7 @@ function FolderBrowser({ cwd, onCwdChange, onPick, picked }: FolderBrowserProps)
     let cancelled = false;
     setLoading(true);
     ipc
-      .listDir(cwd)
+      .browseDir(cwd)
       .then((items) => {
         if (cancelled) return;
         setEntries(items.filter((e) => e.is_dir));
@@ -258,6 +258,7 @@ export function NewWorkspaceModal({
   const [submitting, setSubmitting] = useState(false);
 
   const firstFieldRef = useRef<HTMLDivElement | null>(null);
+  const returnFocusRef = useRef<Element | null>(null);
 
   // Bootstrap: home dir + recents.
   useEffect(() => {
@@ -295,14 +296,18 @@ export function NewWorkspaceModal({
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  // Focus trap entry — focus the first interactive element on mount.
+  // Capture return-focus target and focus first element on open.
   useEffect(() => {
+    returnFocusRef.current = document.activeElement;
     const root = firstFieldRef.current;
     if (!root) return;
     const focusable = root.querySelector<HTMLElement>(
       'button, [role="tab"], input, [tabindex]:not([tabindex="-1"])',
     );
     focusable?.focus();
+    return () => {
+      (returnFocusRef.current as HTMLElement | null)?.focus();
+    };
   }, []);
 
   const trimmedName = name.trim();
@@ -375,6 +380,28 @@ export function NewWorkspaceModal({
           if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
             e.preventDefault();
             submit();
+          } else if (e.key === "Tab") {
+            const root = firstFieldRef.current;
+            if (!root) return;
+            const focusable = Array.from(
+              root.querySelectorAll<HTMLElement>(
+                'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+              )
+            ).filter((n) => !n.hasAttribute("disabled"));
+            if (focusable.length === 0) return;
+            const first = focusable[0];
+            const last = focusable[focusable.length - 1];
+            if (e.shiftKey) {
+              if (document.activeElement === first) {
+                e.preventDefault();
+                last.focus();
+              }
+            } else {
+              if (document.activeElement === last) {
+                e.preventDefault();
+                first.focus();
+              }
+            }
           }
         }}
       >

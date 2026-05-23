@@ -4,10 +4,10 @@
 //! routes a fake user message through it, composes a system prompt, and
 //! asserts the right skills end up in the prompt.
 
+use pigide_lib::skills::compose_system_prompt;
 use pigide_lib::skills::registry::{SkillRegistry, SkillSource};
 use pigide_lib::skills::router::{route, RouterConfig, RouterMode};
 use pigide_lib::skills::skill::SkillSourceTag;
-use pigide_lib::skills::compose_system_prompt;
 use serde_json::Value;
 use std::collections::BTreeMap;
 use std::fs;
@@ -97,15 +97,17 @@ fn end_to_end_compose_with_routing() {
     assert!(!ids.contains(&"gamma".into()), "gamma should not match");
 
     // Compose: ordered = active in routed order.
-    let by_id: std::collections::HashMap<_, _> =
-        active.iter().map(|s| (s.id.clone(), s)).collect();
+    let by_id: std::collections::HashMap<_, _> = active.iter().map(|s| (s.id.clone(), s)).collect();
     let ordered: Vec<_> = routed
         .selected
         .iter()
         .filter_map(|s| by_id.get(&s.id).copied())
         .collect();
     let mut ctx = BTreeMap::new();
-    ctx.insert("user_message".into(), Value::String("please foo this and bar that".into()));
+    ctx.insert(
+        "user_message".into(),
+        Value::String("please foo this and bar that".into()),
+    );
     let res = compose_system_prompt("BASE PROMPT", &ordered, &ctx, 8000);
     assert!(res.prompt.contains("[ACTIVE SKILLS]"));
     assert!(res.prompt.contains("[SKILL: Alpha"));

@@ -54,12 +54,7 @@ pub fn upsert(
     })
 }
 
-pub fn delete(
-    db: &DbPool,
-    workspace_id: &str,
-    agent_type: &str,
-    role: &str,
-) -> Result<bool> {
+pub fn delete(db: &DbPool, workspace_id: &str, agent_type: &str, role: &str) -> Result<bool> {
     let conn = db.get()?;
     let n = conn.execute(
         "DELETE FROM role_prompts
@@ -69,10 +64,7 @@ pub fn delete(
     Ok(n == 1)
 }
 
-pub fn list_for_workspace(
-    db: &DbPool,
-    workspace_id: &str,
-) -> Result<Vec<RolePromptOverride>> {
+pub fn list_for_workspace(db: &DbPool, workspace_id: &str) -> Result<Vec<RolePromptOverride>> {
     let conn = db.get()?;
     let mut stmt = conn.prepare(
         "SELECT workspace_id, agent_type, role, prompt, updated_at
@@ -101,18 +93,16 @@ pub fn list_for_workspace(
 ///   1. exact workspace + agent_type + role
 ///   2. exact workspace + ""(any agent_type) + role
 ///   3. `Role::default_prompt()`
-pub fn resolve(
-    db: &DbPool,
-    workspace_id: &str,
-    agent_type: &str,
-    role: Role,
-) -> Result<String> {
+pub fn resolve(db: &DbPool, workspace_id: &str, agent_type: &str, role: Role) -> Result<String> {
     let conn = db.get()?;
     let mut stmt = conn.prepare(
         "SELECT prompt FROM role_prompts
          WHERE workspace_id=?1 AND agent_type=?2 AND role=?3",
     )?;
-    if let Some(row) = stmt.query([workspace_id, agent_type, role.as_str()])?.next()? {
+    if let Some(row) = stmt
+        .query([workspace_id, agent_type, role.as_str()])?
+        .next()?
+    {
         return Ok(row.get::<_, String>(0)?);
     }
     let mut stmt = conn.prepare(

@@ -58,7 +58,9 @@ async fn classify_chunk_decision_request_via_mock() {
 
     let client = GeminiClient::new(endpoint(&server), API_KEY.to_string());
 
-    let v = classify_chunk(&client, "Run migrations now? (y/N) ").await.unwrap();
+    let v = classify_chunk(&client, "Run migrations now? (y/N) ")
+        .await
+        .unwrap();
     assert_eq!(v.kind, ClassifierKind::DecisionRequest);
     assert_eq!(v.prompt_text.as_deref(), Some("Run migrations now?"));
     assert_eq!(v.options, vec!["yes".to_string(), "no".to_string()]);
@@ -75,7 +77,9 @@ async fn classify_chunk_noise_via_mock() {
         .await;
 
     let client = GeminiClient::new(endpoint(&server), API_KEY.to_string());
-    let v = classify_chunk(&client, "compiling crate foo\n").await.unwrap();
+    let v = classify_chunk(&client, "compiling crate foo\n")
+        .await
+        .unwrap();
     assert_eq!(v.kind, ClassifierKind::Noise);
 }
 
@@ -89,9 +93,7 @@ async fn classify_chunk_salvages_gemma_prose() {
                           {\"kind\":\"decision_request\",\"prompt_text\":\"Continue?\",\"options\":[\"y\",\"N\"]}\n\n\
                           End.";
     Mock::given(method("POST"))
-        .respond_with(
-            ResponseTemplate::new(200).set_body_json(gemini_response(prose_response)),
-        )
+        .respond_with(ResponseTemplate::new(200).set_body_json(gemini_response(prose_response)))
         .mount(&server)
         .await;
 
@@ -107,9 +109,10 @@ async fn api_key_never_in_url() {
     // headers leak the API key in plaintext to the wrong place.
     let server = MockServer::start().await;
     Mock::given(method("POST"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(gemini_response(
-            r#"{"kind":"noise","options":[]}"#,
-        )))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(gemini_response(r#"{"kind":"noise","options":[]}"#)),
+        )
         .mount(&server)
         .await;
 
@@ -125,7 +128,10 @@ async fn api_key_never_in_url() {
         r.url
     );
     // Header is the only place the key may appear.
-    let header_val = r.headers.get("x-goog-api-key").and_then(|v| v.to_str().ok());
+    let header_val = r
+        .headers
+        .get("x-goog-api-key")
+        .and_then(|v| v.to_str().ok());
     assert_eq!(header_val, Some(API_KEY));
 }
 

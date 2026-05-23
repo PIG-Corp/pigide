@@ -168,7 +168,11 @@ pub fn display_label(path: &Path, workspace_root: Option<&Path>) -> String {
     if let Some(root) = workspace_root {
         if let Ok(rel) = path.strip_prefix(root) {
             let s = rel.to_string_lossy();
-            return if s.is_empty() { ".".to_string() } else { s.into_owned() };
+            return if s.is_empty() {
+                ".".to_string()
+            } else {
+                s.into_owned()
+            };
         }
     }
     collapse_home(path)
@@ -201,7 +205,10 @@ fn suggest_absolute(query: &str, workspace_root: Option<&Path>) -> Vec<Suggestio
     let (dir, frag) = if query.ends_with('/') {
         (p.to_path_buf(), String::new())
     } else {
-        let parent = p.parent().map(Path::to_path_buf).unwrap_or_else(|| PathBuf::from("/"));
+        let parent = p
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| PathBuf::from("/"));
         let frag = p
             .file_name()
             .map(|s| s.to_string_lossy().into_owned())
@@ -277,11 +284,7 @@ fn basename(path: &str) -> String {
 }
 
 /// Bounded recursive walk — visits up to `MAX_WALK_ENTRIES` entries.
-fn walk(
-    root: &Path,
-    frag_lower: &str,
-    workspace_root: Option<&Path>,
-) -> Vec<Suggestion> {
+fn walk(root: &Path, frag_lower: &str, workspace_root: Option<&Path>) -> Vec<Suggestion> {
     let mut out: Vec<Suggestion> = Vec::new();
     let mut stack: Vec<PathBuf> = vec![root.to_path_buf()];
     let mut visited: usize = 0;
@@ -413,18 +416,14 @@ fn validate_shape(path: &str) -> Result<()> {
 /// roots. Symlink-escape is blocked by canonicalisation: we canonicalise
 /// both the candidate and every root, then ensure the candidate is a prefix
 /// match of at least one root.
-pub fn validate(
-    ws_mgr: &WorkspaceManager,
-    raw_path: &str,
-) -> Result<Attachment> {
+pub fn validate(ws_mgr: &WorkspaceManager, raw_path: &str) -> Result<Attachment> {
     validate_shape(raw_path)?;
     let path = PathBuf::from(raw_path);
-    let canon = path.canonicalize().map_err(|e| {
-        Error::NotFound(format!("path {:?} ({})", path, e))
-    })?;
-    let meta = std::fs::metadata(&canon).map_err(|e| {
-        Error::NotFound(format!("metadata {:?} ({})", canon, e))
-    })?;
+    let canon = path
+        .canonicalize()
+        .map_err(|e| Error::NotFound(format!("path {:?} ({})", path, e)))?;
+    let meta = std::fs::metadata(&canon)
+        .map_err(|e| Error::NotFound(format!("metadata {:?} ({})", canon, e)))?;
     let kind = if meta.is_dir() { "dir" } else { "file" };
 
     let roots = allow_roots(ws_mgr);
@@ -448,9 +447,7 @@ pub fn validate(
         .max_by_key(|r| r.as_os_str().len())
         .cloned();
     // Distinguish "active workspace root" (used for label) from `$HOME`.
-    let workspace_root = root.filter(|r| {
-        dirs::home_dir().map(|h| r != &h).unwrap_or(true)
-    });
+    let workspace_root = root.filter(|r| dirs::home_dir().map(|h| r != &h).unwrap_or(true));
     let label = display_label(&canon, workspace_root.as_deref());
     Ok(Attachment {
         kind: kind.to_string(),
@@ -463,10 +460,7 @@ pub fn validate(
 /// per-message cap and de-duplicates by canonical path. Returns
 /// `Err(...)` on the first invalid entry — surfacing a clear,
 /// path-specific error to the UI.
-pub fn validate_all(
-    ws_mgr: &WorkspaceManager,
-    raw: &[Attachment],
-) -> Result<Vec<Attachment>> {
+pub fn validate_all(ws_mgr: &WorkspaceManager, raw: &[Attachment]) -> Result<Vec<Attachment>> {
     if raw.len() > MAX_ATTACHMENTS_PER_MESSAGE {
         return Err(Error::Invalid(format!(
             "too many attachments ({}; max {})",
@@ -699,13 +693,10 @@ mod tests {
         // Construct a non-canonical path that escapes via `..`.
         let traversal = format!("{}/../secret.txt", workspace.display());
         let r = validate(&ws, &traversal);
-        match r {
-            Ok(_) => {
-                // Acceptable only if `secret.txt` happens to live inside `$HOME`.
-                let home = dirs::home_dir().unwrap_or_default();
-                assert!(outside_file.canonicalize().unwrap().starts_with(&home));
-            }
-            Err(_) => {}
+        if r.is_ok() {
+            // Acceptable only if `secret.txt` happens to live inside `$HOME`.
+            let home = dirs::home_dir().unwrap_or_default();
+            assert!(outside_file.canonicalize().unwrap().starts_with(&home));
         }
         fs::remove_dir_all(&parent).ok();
     }
@@ -742,7 +733,11 @@ mod tests {
 
         let (_db, ws, _) = fresh_db_with_ws(vec![workspace.to_str().unwrap()]);
         let r = validate(&ws, link.to_str().unwrap());
-        assert!(r.is_err(), "expected symlink escape to be rejected, got {:?}", r);
+        assert!(
+            r.is_err(),
+            "expected symlink escape to be rejected, got {:?}",
+            r
+        );
         fs::remove_dir_all(&parent).ok();
     }
 

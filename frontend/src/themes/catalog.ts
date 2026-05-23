@@ -44,6 +44,27 @@ const t = (
 ): Theme => ({ id, name, kind, css, xterm });
 
 // ─── Dark ────────────────────────────────────────────────
+
+/**
+ * Target — design-spec contract from `/home/camer/pigide/target.png` and
+ * `docs/design-spec-target.md` (thread design-target-2026-05).
+ * Default theme. Hex values are the §2 palette and MUST match the spec
+ * within ±2% — do not retune.
+ */
+const TARGET = t("target", "Target", "dark", {
+  bg: "#0B0C0F", bgPanel: "#101216", bgRaised: "#15181D",
+  fg: "#E4E6EA", fgMuted: "#8A8F99",
+  border: "#1F232A", borderStrong: "#2A2F38",
+  accent: "#E89A4A", accentFg: "#0B0C0F",
+  danger: "#EF4444", success: "#4ADE80", warn: "#E89A4A", info: "#60A5FA",
+  selection: "#1E3A5F",
+}, {
+  background: "#0B0C0F", foreground: "#E4E6EA",
+  cursor: "#E89A4A", selectionBackground: "#1E3A5F",
+  black: "#101216", red: "#EF4444", green: "#4ADE80", yellow: "#E89A4A",
+  blue: "#60A5FA", magenta: "#C678DD", cyan: "#56B6C2", white: "#E4E6EA",
+});
+
 export const VOID = t("void", "Void", "dark", {
   bg: "#0a0b0e", bgPanel: "#0e0f12", bgRaised: "#14161b",
   fg: "#d6d8dd", fgMuted: "#8a8f99",
@@ -353,7 +374,7 @@ const PAPER = t("paper", "Paper", "light", {
 
 const SOLARIZED_LIGHT = t("solarized-light", "Solarized Light", "light", {
   bg: "#fdf6e3", bgPanel: "#eee8d5", bgRaised: "#ece4cf",
-  fg: "#586e75", fgMuted: "#93a1a1",
+  fg: "#586e75", fgMuted: "#657b83",
   border: "#eee8d5", borderStrong: "#93a1a1",
   accent: "#268bd2", accentFg: "#fdf6e3",
   danger: "#dc322f", success: "#859900", warn: "#b58900", info: "#2aa198",
@@ -436,6 +457,7 @@ const HIGH_CONTRAST = t("high-contrast", "High Contrast", "dark", {
 });
 
 export const THEMES: Theme[] = [
+  TARGET,
   VOID,
   NEON_TOKYO,
   DRACULA,
@@ -466,11 +488,11 @@ export const THEMES: Theme[] = [
   HIGH_CONTRAST,
 ];
 
-export const DEFAULT_THEME_ID = BRIDGEMIND.id;
+export const DEFAULT_THEME_ID = TARGET.id;
 
 export function getTheme(id: string | null | undefined): Theme {
-  if (!id) return VOID;
-  return THEMES.find((t) => t.id === id) ?? VOID;
+  if (!id) return TARGET;
+  return THEMES.find((t) => t.id === id) ?? TARGET;
 }
 
 /**
@@ -531,9 +553,9 @@ export function applyThemeToDom(theme: Theme): void {
   // stacks gracefully on already-darker rows.
   const fgRgb = hexToRgb(c.fg);
   const isLight = theme.kind === "light";
-  const hoverAlpha = isLight ? 0.045 : 0.05;
-  const hoverStrongAlpha = isLight ? 0.075 : 0.08;
-  const activeAlpha = isLight ? 0.11 : 0.11;
+  const hoverAlpha = isLight ? 0.045 : 0.04;
+  const hoverStrongAlpha = isLight ? 0.075 : 0.07;
+  const activeAlpha = isLight ? 0.11 : 0.10;
   set("--hover", rgba(fgRgb, hoverAlpha));
   set("--hover-strong", rgba(fgRgb, hoverStrongAlpha));
   set("--active", rgba(fgRgb, activeAlpha));

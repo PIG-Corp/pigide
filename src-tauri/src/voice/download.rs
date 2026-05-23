@@ -99,7 +99,12 @@ pub fn model_exists(id: ModelId) -> bool {
         ModelId::DistilLarge => 1_200_000_000,
     };
     match model_path(id) {
-        Ok(p) => p.exists() && std::fs::metadata(&p).map(|m| m.len() > min).unwrap_or(false),
+        Ok(p) => {
+            p.exists()
+                && std::fs::metadata(&p)
+                    .map(|m| m.len() > min)
+                    .unwrap_or(false)
+        }
         Err(_) => false,
     }
 }
@@ -135,7 +140,11 @@ pub async fn ensure_model(id: ModelId, app: Option<AppHandle>) -> Result<PathBuf
 
 async fn download_model(id: ModelId, target: &Path, app: Option<AppHandle>) -> Result<()> {
     let url = model_url(id);
-    tracing::info!("downloading whisper {} to {}", id.as_str(), target.display());
+    tracing::info!(
+        "downloading whisper {} to {}",
+        id.as_str(),
+        target.display()
+    );
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(60 * 60))
         .build()?;

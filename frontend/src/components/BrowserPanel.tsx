@@ -3,6 +3,15 @@ import { useStore } from "../state/store";
 import { ipc } from "../state/ipc";
 import { ArrowLeft, ArrowRight, RotateCw, X } from "./icons";
 
+function isSafeUrl(url: string): boolean {
+  try {
+    const u = new URL(url);
+    return u.protocol === "http:" || u.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
 const DEFAULT_BOOKMARKS = [
   { name: "MDN", url: "https://developer.mozilla.org/" },
   { name: "Tauri", url: "https://tauri.app/" },
@@ -50,10 +59,14 @@ export function BrowserPanel({ onClose }: { onClose?: () => void }) {
   const navigate = (target: string) => {
     const trimmed = target.trim();
     if (!trimmed) return;
-    const final = trimmed.startsWith("http") ? trimmed : `https://${trimmed}`;
-    setUrl(final);
-    setDraft(final);
-    ipc.setSetting("browser.last_url", final).catch(() => undefined);
+    const withScheme = trimmed.startsWith("http") ? trimmed : `https://${trimmed}`;
+    if (!isSafeUrl(withScheme)) {
+      pushToast({ text: "Only http: and https: URLs are allowed.", kind: "error" });
+      return;
+    }
+    setUrl(withScheme);
+    setDraft(withScheme);
+    ipc.setSetting("browser.last_url", withScheme).catch(() => undefined);
   };
 
   const back = () => {
@@ -89,13 +102,13 @@ export function BrowserPanel({ onClose }: { onClose?: () => void }) {
   return (
     <div className="browser-panel">
       <div className="browser-toolbar">
-        <button onClick={back} title="Back">
+        <button onClick={back} title="Back" aria-label="Back">
           <ArrowLeft size={12} />
         </button>
-        <button onClick={forward} title="Forward">
+        <button onClick={forward} title="Forward" aria-label="Forward">
           <ArrowRight size={12} />
         </button>
-        <button onClick={reload} title="Reload" disabled={!url}>
+        <button onClick={reload} title="Reload" disabled={!url} aria-label="Reload">
           <RotateCw size={12} />
         </button>
         <input
@@ -112,10 +125,12 @@ export function BrowserPanel({ onClose }: { onClose?: () => void }) {
         <button
           onClick={() => setShowBookmarks((v) => !v)}
           title="Bookmarks"
+          aria-label="Bookmarks"
+          aria-expanded={showBookmarks}
         >
           ★
         </button>
-        <button onClick={addBookmark} disabled={!url} title="Add bookmark">
+        <button onClick={addBookmark} disabled={!url} title="Add bookmark" aria-label="Add bookmark">
           +
         </button>
         {onClose ? (
@@ -123,6 +138,7 @@ export function BrowserPanel({ onClose }: { onClose?: () => void }) {
             className="btn--icon"
             onClick={onClose}
             title="Close"
+            aria-label="Close browser"
           >
             <X size={12} />
           </button>

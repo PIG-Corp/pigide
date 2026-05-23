@@ -1,9 +1,10 @@
 use serde::{Deserialize, Serialize};
 
 /// Recursive layout tree (mirrors frontend types).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum LayoutNode {
+    #[default]
     Empty,
     Leaf {
         #[serde(rename = "agentId")]
@@ -22,12 +23,6 @@ pub enum LayoutNode {
 pub enum SplitDir {
     H,
     V,
-}
-
-impl Default for LayoutNode {
-    fn default() -> Self {
-        LayoutNode::Empty
-    }
 }
 
 impl LayoutNode {
@@ -57,7 +52,7 @@ impl LayoutNode {
                 agent_id: agent_id.to_string(),
             },
             LayoutNode::Leaf { .. } => LayoutNode::Split {
-                direction: if depth % 2 == 0 {
+                direction: if depth.is_multiple_of(2) {
                     SplitDir::V
                 } else {
                     SplitDir::H

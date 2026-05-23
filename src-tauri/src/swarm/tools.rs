@@ -13,11 +13,12 @@ pub fn tool_definitions() -> Vec<Value> {
             json!({
                 "type": "object",
                 "properties": {
+                    "from_agent_id": {"type": "string"},
                     "to": {"type": "string"},
                     "body": {"type": "string"},
                     "thread_id": {"type": "string"}
                 },
-                "required": ["to", "body"]
+                "required": ["from_agent_id", "to", "body"]
             }),
         ),
         function_tool(
@@ -26,10 +27,11 @@ pub fn tool_definitions() -> Vec<Value> {
             json!({
                 "type": "object",
                 "properties": {
+                    "from_agent_id": {"type": "string"},
                     "role": {"type": "string", "enum": ["coordinator","builder","reviewer","scout"]},
                     "body": {"type": "string"}
                 },
-                "required": ["role", "body"]
+                "required": ["from_agent_id", "role", "body"]
             }),
         ),
         function_tool(
@@ -38,11 +40,12 @@ pub fn tool_definitions() -> Vec<Value> {
             json!({
                 "type": "object",
                 "properties": {
+                    "agent_id": {"type": "string"},
                     "to": {"type": "string"},
                     "unread_only": {"type": "boolean", "default": true},
                     "limit": {"type": "integer", "minimum": 1, "maximum": 200, "default": 50}
                 },
-                "required": ["to"]
+                "required": ["agent_id", "to"]
             }),
         ),
         function_tool(
@@ -51,9 +54,10 @@ pub fn tool_definitions() -> Vec<Value> {
             json!({
                 "type": "object",
                 "properties": {
+                    "agent_id": {"type": "string"},
                     "ids": {"type": "array", "items": {"type": "string"}}
                 },
-                "required": ["ids"]
+                "required": ["agent_id", "ids"]
             }),
         ),
         function_tool(
@@ -166,28 +170,34 @@ fn function_tool(name: &str, description: &str, parameters: Value) -> Value {
 pub fn dispatch(db: &DbPool, name: &str, args: &Value) -> Result<Value> {
     match name {
         "send_mail" => {
+            let from_agent_id = arg_str(args, "from_agent_id")?;
             let to = arg_str(args, "to")?;
             let body = arg_str(args, "body")?;
             let thread = args.get("thread_id").and_then(|v| v.as_str());
-            let m = mailbox::send(db, None, to, body, thread)?;
+            let m = mailbox::send(db, from_agent_id, to, body, thread)?;
             Ok(json!(m))
         }
         "broadcast" => {
+            let from_agent_id = arg_str(args, "from_agent_id")?;
             let role = arg_str(args, "role")?;
             let body = arg_str(args, "body")?;
-            let m = mailbox::broadcast(db, None, role, body)?;
+            let m = mailbox::broadcast(db, from_agent_id, role, body)?;
             Ok(json!(m))
         }
         "read_mailbox" => {
+            let agent_id = arg_str(args, "agent_id")?;
             let to = arg_str(args, "to")?;
             let unread = args
                 .get("unread_only")
                 .and_then(|v| v.as_bool())
                 .unwrap_or(true);
             let limit = args.get("limit").and_then(|v| v.as_i64()).unwrap_or(50);
-            Ok(json!(mailbox::list(db, Some(to), unread, limit)?))
+            Ok(json!(mailbox::list_for_reader(
+                db, agent_id, to, unread, limit
+            )?))
         }
         "mark_mail_read" => {
+            let agent_id = arg_str(args, "agent_id")?;
             let ids: Vec<String> = args
                 .get("ids")
                 .and_then(|v| v.as_array())
@@ -197,7 +207,7 @@ pub fn dispatch(db: &DbPool, name: &str, args: &Value) -> Result<Value> {
                         .collect()
                 })
                 .unwrap_or_default();
-            let n = mailbox::mark_read(db, &ids)?;
+            let n = mailbox::mark_read_for_reader(db, agent_id, &ids)?;
             Ok(json!({"updated": n}))
         }
         "start_rollcall" => {

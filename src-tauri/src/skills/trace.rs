@@ -66,18 +66,8 @@ pub fn record(
 ) -> Result<TraceRow> {
     let id = Uuid::new_v4().to_string();
     let turn_at = Utc::now().to_rfc3339();
-    let selected: Vec<TraceSelection> = routed
-        .selected
-        .iter()
-        .cloned()
-        .map(Into::into)
-        .collect();
-    let rejected: Vec<TraceSelection> = routed
-        .rejected
-        .iter()
-        .cloned()
-        .map(Into::into)
-        .collect();
+    let selected: Vec<TraceSelection> = routed.selected.iter().cloned().map(Into::into).collect();
+    let rejected: Vec<TraceSelection> = routed.rejected.iter().cloned().map(Into::into).collect();
     let row = TraceRow {
         id: id.clone(),
         session_id: session_id.to_string(),
@@ -126,23 +116,24 @@ pub fn latest(pool: &DbPool, session_id: Option<&str>) -> Result<Option<TraceRow
         ),
     };
     let mut stmt = conn.prepare(sql)?;
-    let row_iter = stmt.query_map(rusqlite::params_from_iter(params.iter().map(|v| {
-        match v {
+    let mut row_iter = stmt.query_map(
+        rusqlite::params_from_iter(params.iter().map(|v| match v {
             Value::String(s) => s.clone(),
             other => other.to_string(),
-        }
-    })), |r| {
-        Ok(TraceRow {
-            id: r.get(0)?,
-            session_id: r.get(1)?,
-            turn_at: r.get(2)?,
-            selected: serde_json::from_str(&r.get::<_, String>(3)?).unwrap_or_default(),
-            rejected: serde_json::from_str(&r.get::<_, String>(4)?).unwrap_or_default(),
-            composed_chars: r.get(5)?,
-            fallback_used: r.get::<_, i32>(6)? != 0,
-        })
-    })?;
-    for row in row_iter {
+        })),
+        |r| {
+            Ok(TraceRow {
+                id: r.get(0)?,
+                session_id: r.get(1)?,
+                turn_at: r.get(2)?,
+                selected: serde_json::from_str(&r.get::<_, String>(3)?).unwrap_or_default(),
+                rejected: serde_json::from_str(&r.get::<_, String>(4)?).unwrap_or_default(),
+                composed_chars: r.get(5)?,
+                fallback_used: r.get::<_, i32>(6)? != 0,
+            })
+        },
+    )?;
+    if let Some(row) = row_iter.next() {
         return Ok(Some(row?));
     }
     Ok(None)

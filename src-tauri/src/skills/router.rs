@@ -5,24 +5,19 @@
 
 use crate::skills::skill::Skill;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum RouterMode {
     /// Skills system disabled; router never returns anything.
     Off,
     /// Pure lexical/tag/trigger pass — the default.
+    #[default]
     Deterministic,
     /// Deterministic first; LLM tie-break only if no deterministic hits.
     Auto,
 }
 
-impl Default for RouterMode {
-    fn default() -> Self {
-        RouterMode::Deterministic
-    }
-}
-
 impl RouterMode {
-    pub fn from_str(s: &str) -> Self {
+    pub fn parse(s: &str) -> Self {
         match s.to_ascii_lowercase().as_str() {
             "off" | "false" | "0" => RouterMode::Off,
             "auto" => RouterMode::Auto,
@@ -217,7 +212,14 @@ mod tests {
     use super::*;
     use crate::skills::skill::{parse, SkillSourceTag};
 
-    fn skill(id: &str, name: &str, body: &str, prio: u32, triggers: &[&str], tags: &[&str]) -> Skill {
+    fn skill(
+        id: &str,
+        name: &str,
+        body: &str,
+        prio: u32,
+        triggers: &[&str],
+        tags: &[&str],
+    ) -> Skill {
         let trig = triggers
             .iter()
             .map(|t| format!("\"{}\"", t))
@@ -228,7 +230,9 @@ mod tests {
             "---\nid: {}\nname: {}\ndescription: test desc {}\npriority: {}\ntags: [{}]\ntriggers: [{}]\n---\n{}\n",
             id, name, id, prio, tg, trig, body
         );
-        parse("/x.md", SkillSourceTag::Builtin, &raw).unwrap().unwrap()
+        parse("/x.md", SkillSourceTag::Builtin, &raw)
+            .unwrap()
+            .unwrap()
     }
 
     #[test]
@@ -237,7 +241,12 @@ mod tests {
             skill("alpha", "Alpha", "body", 50, &["foo"], &[]),
             skill("beta", "Beta", "body", 50, &["bar"], &[]),
         ];
-        let r = route(&sks, "please foo this for me", &RouterConfig::default(), false);
+        let r = route(
+            &sks,
+            "please foo this for me",
+            &RouterConfig::default(),
+            false,
+        );
         assert_eq!(r.selected.first().unwrap().id, "alpha");
     }
 
@@ -281,7 +290,12 @@ mod tests {
     #[test]
     fn cutoff_drops_irrelevant() {
         let sks = vec![skill("alpha", "Alpha", "body", 0, &[], &[])];
-        let r = route(&sks, "totally unrelated message", &RouterConfig::default(), false);
+        let r = route(
+            &sks,
+            "totally unrelated message",
+            &RouterConfig::default(),
+            false,
+        );
         assert!(r.selected.is_empty());
         assert_eq!(r.rejected.len(), 1);
     }

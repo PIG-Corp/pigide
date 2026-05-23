@@ -19,6 +19,7 @@ export function WorkspaceSidebar() {
   const setCurrent = useStore((s) => s.setCurrent);
   const setLayout = useStore((s) => s.setLayout);
   const setAgents = useStore((s) => s.setAgents);
+  const clearWorkspaceState = useStore((s) => s.clearWorkspaceState);
   const pushToast = useStore((s) => s.pushToast);
   const newOpen = useStore((s) => s.newWorkspaceModalOpen);
   const setNewOpen = useStore((s) => s.setNewWorkspaceModalOpen);
@@ -37,6 +38,7 @@ export function WorkspaceSidebar() {
 
   const switchTo = async (id: string) => {
     try {
+      clearWorkspaceState();
       await ipc.setCurrentWorkspace(id);
       setCurrent(id);
       const ws = await ipc.getWorkspace(id);

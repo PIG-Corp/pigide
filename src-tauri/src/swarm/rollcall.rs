@@ -42,7 +42,7 @@ pub fn start(db: &DbPool, role: &str, prompt: &str) -> Result<RollcallSummary> {
     }
     // Broadcast the prompt with a marker so agents know what to reply to.
     let body = format!("[rollcall:{}] {}", id, prompt);
-    mailbox::broadcast(db, None, role, &body)?;
+    mailbox::broadcast_system(db, role, &body)?;
     Ok(RollcallSummary {
         id,
         role: role.to_string(),
@@ -65,9 +65,8 @@ pub fn respond(db: &DbPool, rollcall_id: &str, agent_id: &str, body: &str) -> Re
 
 pub fn collect(db: &DbPool, rollcall_id: &str) -> Result<RollcallSummary> {
     let conn = db.get()?;
-    let mut stmt = conn.prepare(
-        "SELECT id, role, prompt, created_at FROM rollcalls WHERE id=?1",
-    )?;
+    let mut stmt =
+        conn.prepare("SELECT id, role, prompt, created_at FROM rollcalls WHERE id=?1")?;
     let mut rows = stmt.query([rollcall_id])?;
     let row = rows
         .next()?

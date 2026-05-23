@@ -79,10 +79,14 @@ export function KanbanBoard() {
   const move = async (taskId: string, status: TaskStatus) => {
     const cur = tasks[taskId];
     if (!cur || cur.status === status) return;
+    // Optimistic update
+    upsertTask({ ...cur, status });
     try {
       const t = await ipc.updateTask({ id: taskId, status });
       upsertTask(t);
     } catch (err) {
+      // Rollback to previous state
+      upsertTask(cur);
       pushToast({ text: `update_task: ${err}`, kind: "error" });
     }
   };

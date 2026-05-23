@@ -29,4 +29,3 @@ pub struct AppState {
     #[cfg(feature = "watcher")]
     pub watcher: parking_lot::RwLock<Option<Arc<crate::watcher::Watcher>>>,
 }
-

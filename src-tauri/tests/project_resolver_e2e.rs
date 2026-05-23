@@ -3,7 +3,7 @@
 use pigide_lib::project_resolver::indexer::{scan, ScanOptions};
 use pigide_lib::project_resolver::resolver::{resolve, ResolveContext, ResolveStatus};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 fn tmp(suffix: &str) -> PathBuf {
     let p = std::env::temp_dir().join(format!(
@@ -15,7 +15,7 @@ fn tmp(suffix: &str) -> PathBuf {
     p
 }
 
-fn make(root: &PathBuf, name: &str, files: &[(&str, &str)]) {
+fn make(root: &Path, name: &str, files: &[(&str, &str)]) {
     let p = root.join(name);
     fs::create_dir_all(&p).unwrap();
     for (fname, body) in files {
@@ -27,13 +27,16 @@ fn make(root: &PathBuf, name: &str, files: &[(&str, &str)]) {
     }
 }
 
-fn corpus(root: &PathBuf) {
+fn corpus(root: &Path) {
     make(
         root,
         "drugs-tracker-plugin",
         &[
             ("Cargo.toml", "[package]\nname = \"drugs_tracker\"\n"),
-            ("README.md", "# Drugs Plugin\n\nPaper plugin to track drugs\n"),
+            (
+                "README.md",
+                "# Drugs Plugin\n\nPaper plugin to track drugs\n",
+            ),
             ("paper-plugin.yml", "name: DrugsPlugin\nversion: 1.0\n"),
         ],
     );
@@ -123,8 +126,8 @@ fn fifteen_realistic_queries() {
         ("pgide", Some("pigide")),
         ("fancy", Some("fancy-dashboard")),
         ("dashboard", Some("fancy-dashboard")),
-        ("kettlebell-routine-zzz", None),            // not_found
-        ("xyzzy frobnicator", None),                 // not_found
+        ("kettlebell-routine-zzz", None), // not_found
+        ("xyzzy frobnicator", None),      // not_found
         ("totally", Some("totally-unrelated-thing")),
         // ambiguous between pigide and pigide-mobile is acceptable —
         // either Found(pigide) or Ambiguous is fine, but pigide must
@@ -178,8 +181,16 @@ fn warm_resolve_under_50ms() {
 fn ambiguity_surfaces_topk() {
     let root = tmp("ambig");
     make(&root, "alpha", &[("Cargo.toml", "[package]\nname=\"a\"")]);
-    make(&root, "alpha-2", &[("Cargo.toml", "[package]\nname=\"a2\"")]);
-    make(&root, "alpha-3", &[("Cargo.toml", "[package]\nname=\"a3\"")]);
+    make(
+        &root,
+        "alpha-2",
+        &[("Cargo.toml", "[package]\nname=\"a2\"")],
+    );
+    make(
+        &root,
+        "alpha-3",
+        &[("Cargo.toml", "[package]\nname=\"a3\"")],
+    );
     let idx = scan(ScanOptions {
         roots: vec![root.clone()],
         max_depth: 4,

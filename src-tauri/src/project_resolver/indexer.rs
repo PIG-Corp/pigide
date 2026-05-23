@@ -73,8 +73,8 @@ fn excluded_abs() -> Vec<PathBuf> {
     }
     if let Some(home) = dirs::home_dir() {
         for child in &[
-            ".cache", ".config", ".local", ".ssh", ".gnupg", ".cargo",
-            ".rustup", ".npm", ".pnpm", ".yarn",
+            ".cache", ".config", ".local", ".ssh", ".gnupg", ".cargo", ".rustup", ".npm", ".pnpm",
+            ".yarn",
         ] {
             v.push(home.join(child));
         }
@@ -116,7 +116,7 @@ fn excluded(path: &Path, abs_excludes: &[PathBuf]) -> bool {
         }
     }
     if let Some(name) = path.file_name().and_then(|s| s.to_str()) {
-        if EXCLUDE_DIR_NAMES.iter().any(|d| *d == name) {
+        if EXCLUDE_DIR_NAMES.contains(&name) {
             return true;
         }
     }
@@ -139,7 +139,12 @@ fn mtime_secs(path: &Path) -> i64 {
 
 /// Walk one root with bounded depth, calling `visit` for every project root
 /// found. Once a project root is visited we don't descend into it.
-fn walk_root(root: &Path, max_depth: usize, abs_excludes: &[PathBuf], visit: &mut impl FnMut(&Path)) {
+fn walk_root(
+    root: &Path,
+    max_depth: usize,
+    abs_excludes: &[PathBuf],
+    visit: &mut impl FnMut(&Path),
+) {
     fn descend(
         path: &Path,
         depth: usize,
@@ -249,16 +254,16 @@ pub fn scan(opts: ScanOptions) -> ProjectIndex {
     }
 
     // Stable order: most-recently-modified first, then path.
-    entries.sort_by(|a, b| {
-        b.mtime
-            .cmp(&a.mtime)
-            .then_with(|| a.path.cmp(&b.path))
-    });
+    entries.sort_by(|a, b| b.mtime.cmp(&a.mtime).then_with(|| a.path.cmp(&b.path)));
 
     ProjectIndex {
         version: INDEX_VERSION,
         built_at: chrono::Utc::now().to_rfc3339(),
-        roots: opts.roots.iter().map(|p| p.to_string_lossy().into_owned()).collect(),
+        roots: opts
+            .roots
+            .iter()
+            .map(|p| p.to_string_lossy().into_owned())
+            .collect(),
         projects: entries,
     }
 }
@@ -297,8 +302,7 @@ pub fn is_fresh(idx: &ProjectIndex, max_age: std::time::Duration) -> bool {
     };
     let now = chrono::Utc::now().with_timezone(&built.timezone());
     let age = now.signed_duration_since(built);
-    age.num_seconds() >= 0
-        && (age.num_seconds() as u64) <= max_age.as_secs()
+    age.num_seconds() >= 0 && (age.num_seconds() as u64) <= max_age.as_secs()
 }
 
 #[cfg(test)]
@@ -330,11 +334,18 @@ mod tests {
     #[test]
     fn finds_projects_in_root() {
         let root = tmp("scan");
-        let _a = make_project(&root, "alpha", &[("Cargo.toml", "[package]\nname=\"alpha\"")]);
+        let _a = make_project(
+            &root,
+            "alpha",
+            &[("Cargo.toml", "[package]\nname=\"alpha\"")],
+        );
         let _b = make_project(
             &root,
             "drugs-tracker-plugin",
-            &[("paper-plugin.yml", "name: DrugsPlugin\ndescription: tracks\n")],
+            &[(
+                "paper-plugin.yml",
+                "name: DrugsPlugin\ndescription: tracks\n",
+            )],
         );
         // Nested inside an excluded dir → must not be indexed.
         let nm = root.join("alpha").join("node_modules").join("inner");
@@ -356,7 +367,11 @@ mod tests {
     #[test]
     fn does_not_descend_into_project() {
         let root = tmp("noinner");
-        let outer = make_project(&root, "outer", &[("Cargo.toml", "[package]\nname=\"outer\"")]);
+        let outer = make_project(
+            &root,
+            "outer",
+            &[("Cargo.toml", "[package]\nname=\"outer\"")],
+        );
         // sub-package — should be ignored by the outer detection.
         let inner = outer.join("crates").join("inner");
         fs::create_dir_all(&inner).unwrap();
@@ -415,7 +430,11 @@ mod tests {
         assert!(idx.projects.len() == 50);
         // 50 projects under one fresh root has to come in well under
         // the 5s budget for 200 projects.
-        assert!(started.elapsed().as_secs() < 3, "took {:?}", started.elapsed());
+        assert!(
+            started.elapsed().as_secs() < 3,
+            "took {:?}",
+            started.elapsed()
+        );
         fs::remove_dir_all(&root).ok();
     }
 }

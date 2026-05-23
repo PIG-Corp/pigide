@@ -13,6 +13,17 @@ import {
   useArchitectStore,
   type ArchitectDecision,
 } from "../state/architect";
+import { ipc } from "../state/ipc";
+
+const ARCHITECT_MODELS = [
+  "kr/claude-opus-4.7",
+  "kr/claude-opus-4.6",
+  "kr/claude-sonnet-4.6",
+  "kr/claude-sonnet-4.5",
+  "kr/claude-haiku-4.5",
+];
+
+const SETTING_KEY = "architect.model";
 
 export function ArchitectPanel() {
   const enabled = useArchitectStore((s) => s.enabled);
@@ -22,6 +33,22 @@ export function ArchitectPanel() {
   const pushDecision = useArchitectStore((s) => s.pushDecision);
   const setSignals = useArchitectStore((s) => s.setSignals);
   const [busy, setBusy] = useState(false);
+  const [model, setModel] = useState(ARCHITECT_MODELS[0]);
+
+  useEffect(() => {
+    ipc.getSetting(SETTING_KEY).then((v) => {
+      if (v && ARCHITECT_MODELS.includes(v)) setModel(v);
+    });
+  }, []);
+
+  const onModelChange = async (value: string) => {
+    setModel(value);
+    try {
+      await ipc.setSetting(SETTING_KEY, value);
+    } catch (err) {
+      console.warn("architect model save", err);
+    }
+  };
 
   // Initial config + log + event subscriptions.
   useEffect(() => {
@@ -76,6 +103,21 @@ export function ArchitectPanel() {
           />
           <span>{enabled ? "ON" : "OFF"}</span>
         </label>
+      </div>
+      <div className="architect-model-section">
+        <label className="architect-model-label" htmlFor="architect-model-select">
+          Model
+        </label>
+        <select
+          id="architect-model-select"
+          className="architect-model-select"
+          value={model}
+          onChange={(e) => onModelChange(e.target.value)}
+        >
+          {ARCHITECT_MODELS.map((m) => (
+            <option key={m} value={m}>{m}</option>
+          ))}
+        </select>
       </div>
       <div className="architect-log">
         {recent.length === 0 ? (

@@ -79,7 +79,7 @@ export function MemoryGraph({ onSelect }: { onSelect?: (id: string) => void }) {
           height={size.h}
           graphData={data}
           nodeRelSize={4}
-          nodeLabel={(n: any) => (n as RFNode).title || (n as RFNode).id}
+          nodeLabel={(n: any) => escapeHtml((n as RFNode).title || (n as RFNode).id)}
           nodeColor={(n: any) =>
             (n as RFNode).id === UNRESOLVED ? colorSubtle : colorAccent
           }
@@ -115,6 +115,14 @@ export function MemoryGraph({ onSelect }: { onSelect?: (id: string) => void }) {
       ) : null}
     </div>
   );
+}
+
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
 
 function transform(g: GraphData): { nodes: RFNode[]; links: RFLink[] } {

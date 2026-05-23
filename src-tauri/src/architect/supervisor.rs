@@ -217,7 +217,9 @@ impl Architect {
     }
 
     fn current_workspace_id(&self) -> Option<String> {
-        db::get_setting(&self.db, "current_workspace_id").ok().flatten()
+        db::get_setting(&self.db, "current_workspace_id")
+            .ok()
+            .flatten()
     }
 
     fn tick(&self, cfg: &ArchitectConfig) -> crate::error::Result<()> {
@@ -279,13 +281,7 @@ impl Architect {
                 false
             };
 
-            let decision = decide(
-                signal,
-                &tail,
-                has_pending,
-                pinged_stuck,
-                retried_error,
-            );
+            let decision = decide(signal, &tail, has_pending, pinged_stuck, retried_error);
 
             // Дедупликация: если решение Observe и сигнал не сменился —
             // ничего не пишем в лог (иначе UI зальёт спамом).
@@ -356,12 +352,7 @@ impl Architect {
         s.last_signal = Some(signal);
     }
 
-    fn post_decision_state(
-        &self,
-        agent_id: &str,
-        signal: AgentSignal,
-        decision: &PolicyDecision,
-    ) {
+    fn post_decision_state(&self, agent_id: &str, signal: AgentSignal, decision: &PolicyDecision) {
         let mut g = self.state.write();
         let s = g.entry(agent_id.to_string()).or_default();
         s.last_signal = Some(signal);
@@ -412,15 +403,13 @@ impl Architect {
                 true
             }
             PolicyDecision::PingStuck { .. } => {
-                let msg = b"\r/* architect: status? */\r";
-                if let Err(e) = self.agent_mgr.write(agent_id, msg) {
-                    tracing::warn!("architect PingStuck write: {}", e);
-                    return false;
-                }
-                true
+                // No PTY injection — just record the decision so the next
+                // Stuck signal escalates instead of pinging again.
+                false
             }
             PolicyDecision::AutoRetryError { .. } => {
-                let msg = b"\rThe last command failed. Inspect the error above and propose a fix.\r";
+                let msg =
+                    b"\rThe last command failed. Inspect the error above and propose a fix.\r";
                 if let Err(e) = self.agent_mgr.write(agent_id, msg) {
                     tracing::warn!("architect AutoRetryError write: {}", e);
                     return false;
@@ -451,6 +440,18 @@ impl Architect {
         if let Err(e) = self.task_mgr.assign(&next.id, Some(agent_id)) {
             tracing::warn!("architect assign: {}", e);
             return false;
+        }
+        // Move out of `todo` so the next tick doesn't re-pick the same row
+        // and re-spam the agent before it has produced any output.
+        if let Err(e) = self.task_mgr.update(crate::tasks::UpdateTaskArgs {
+            id: next.id.clone(),
+            title: None,
+            instructions: None,
+            knowledge: None,
+            status: Some("in_progress".into()),
+            agent_id: None,
+        }) {
+            tracing::warn!("architect mark in_progress: {}", e);
         }
         let prompt = format!(
             "\rArchitect: take task `{}`. Brief:\n{}\n\nWhen done, print `handoff_ready: <summary>`.\r",

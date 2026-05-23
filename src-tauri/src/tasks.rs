@@ -102,11 +102,10 @@ impl TaskManager {
             return Err(Error::NotFound(format!("workspace {}", args.workspace_id)));
         }
         if let Some(parent) = &args.parent_id {
-            let pe: i64 = conn.query_row(
-                "SELECT COUNT(*) FROM tasks WHERE id=?1",
-                [parent],
-                |r| r.get(0),
-            )?;
+            let pe: i64 =
+                conn.query_row("SELECT COUNT(*) FROM tasks WHERE id=?1", [parent], |r| {
+                    r.get(0)
+                })?;
             if pe == 0 {
                 return Err(Error::NotFound(format!("parent task {}", parent)));
             }
@@ -150,7 +149,7 @@ impl TaskManager {
         let row = rows
             .next()?
             .ok_or_else(|| Error::NotFound(format!("task {}", id)))?;
-        Ok(row_to_task(row)?)
+        row_to_task(row)
     }
 
     pub fn list(
@@ -186,7 +185,11 @@ impl TaskManager {
             params.iter().map(|s| s as &dyn rusqlite::ToSql).collect();
         let rows = stmt.query_map(refs.as_slice(), |r| {
             Ok(row_to_task(r).map_err(|e| {
-                rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(e))
+                rusqlite::Error::FromSqlConversionFailure(
+                    0,
+                    rusqlite::types::Type::Text,
+                    Box::new(e),
+                )
             }))
         })?;
         let mut out = Vec::new();
@@ -225,6 +228,9 @@ impl TaskManager {
                 // in_progress, in_review, cancelled) are unrestricted.
                 if s == "complete" && cur.status != "complete" {
                     crate::swarm::review::task_completable(&self.db, &args.id)?;
+                }
+                if (s == "cancelled" || s == "complete") && cur.status != s {
+                    let _ = crate::swarm::ownership::release_all_for_task(&self.db, &args.id);
                 }
                 s
             }
@@ -278,11 +284,10 @@ impl TaskManager {
     pub fn assign(&self, task_id: &str, agent_id: Option<&str>) -> Result<Task> {
         if let Some(aid) = agent_id {
             let conn = self.db.get()?;
-            let exists: i64 = conn.query_row(
-                "SELECT COUNT(*) FROM agents WHERE id=?1",
-                [aid],
-                |r| r.get(0),
-            )?;
+            let exists: i64 =
+                conn.query_row("SELECT COUNT(*) FROM agents WHERE id=?1", [aid], |r| {
+                    r.get(0)
+                })?;
             if exists == 0 {
                 return Err(Error::NotFound(format!("agent {}", aid)));
             }

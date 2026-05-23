@@ -63,10 +63,9 @@ export function TilingArea() {
           <div className="actions">
             <button onClick={() => spawn("kiro-cli")}>+ kiro-cli</button>
             <button onClick={() => spawn("claude")}>+ claude</button>
-            <button onClick={() => spawn("aider")}>+ aider</button>
-            <button onClick={() => spawn("goose")}>+ goose</button>
             <button onClick={() => spawn("opencode")}>+ opencode</button>
             <button onClick={() => spawn("devin")}>+ devin</button>
+            <button onClick={() => spawn("agy")}>+ agy</button>
           </div>
         </div>
       );
@@ -108,7 +107,7 @@ export function TilingArea() {
     );
   };
 
-  const spawn = async (kind: "kiro-cli" | "claude" | "aider" | "goose" | "opencode" | "devin") => {
+  const spawn = async (kind: "kiro-cli" | "claude" | "opencode" | "devin" | "agy") => {
     if (!currentId) return;
     try {
       const list = await ipc.spawnAgent(currentId, kind);
@@ -127,10 +126,9 @@ export function TilingArea() {
         <div className="tiling-area-toolbar">
           <button onClick={() => spawn("kiro-cli")}>+ kiro-cli</button>
           <button onClick={() => spawn("claude")}>+ claude</button>
-          <button onClick={() => spawn("aider")}>+ aider</button>
-          <button onClick={() => spawn("goose")}>+ goose</button>
           <button onClick={() => spawn("opencode")}>+ opencode</button>
           <button onClick={() => spawn("devin")}>+ devin</button>
+          <button onClick={() => spawn("agy")}>+ agy</button>
           <span className="spacer" />
           <span className="tiling-area-meta">
             maximized: {maximizedLeafId.slice(0, 8)}
@@ -152,10 +150,9 @@ export function TilingArea() {
       <div className="tiling-area-toolbar">
         <button onClick={() => spawn("kiro-cli")}>+ kiro-cli</button>
         <button onClick={() => spawn("claude")}>+ claude</button>
-        <button onClick={() => spawn("aider")}>+ aider</button>
-        <button onClick={() => spawn("goose")}>+ goose</button>
         <button onClick={() => spawn("opencode")}>+ opencode</button>
         <button onClick={() => spawn("devin")}>+ devin</button>
+        <button onClick={() => spawn("agy")}>+ agy</button>
         <span className="spacer" />
         <div className="room-menu-wrap">
           <button

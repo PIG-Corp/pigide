@@ -143,14 +143,24 @@ fn parse_frontmatter(slug: &str, fm: &str, body: &str) -> Result<Note> {
         tags,
         aliases,
         body: body.to_string(),
-        created_at: if created_at.is_empty() { now.clone() } else { created_at },
-        updated_at: if updated_at.is_empty() { now } else { updated_at },
+        created_at: if created_at.is_empty() {
+            now.clone()
+        } else {
+            created_at
+        },
+        updated_at: if updated_at.is_empty() {
+            now
+        } else {
+            updated_at
+        },
     })
 }
 
 fn split_frontmatter(raw: &str) -> (Option<&str>, &str) {
     // Frontmatter is: starts with "---" line, followed by yaml, ends with "---" line.
-    let stripped = raw.strip_prefix("---\n").or_else(|| raw.strip_prefix("---\r\n"));
+    let stripped = raw
+        .strip_prefix("---\n")
+        .or_else(|| raw.strip_prefix("---\r\n"));
     let (fm_start, after_open) = match stripped {
         Some(rest) => (true, rest),
         None => (false, raw),
@@ -220,7 +230,7 @@ fn yaml_unescape(s: &str) -> String {
 
 fn slug_to_title(slug: &str) -> String {
     let last = slug.rsplit('/').next().unwrap_or(slug);
-    last.replace('-', " ").replace('_', " ")
+    last.replace(['-', '_'], " ")
 }
 
 /// Used by the watcher path → re-parse from disk.

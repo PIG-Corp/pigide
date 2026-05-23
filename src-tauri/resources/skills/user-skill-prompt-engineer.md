@@ -12,7 +12,7 @@ inputs:
     description: builder | reviewer | scout | coordinator
   - name: agent_type
     required: false
-    description: kiro-cli | claude | aider | goose | opencode
+    description: kiro-cli | claude | opencode | devin
   - name: goal
     required: true
   - name: constraints
@@ -38,7 +38,7 @@ enabled: true
 
 You are the prompt-engineer the Architect calls right before it dispatches a
 sub-agent via `send_to_agent`. You produce **one** self-contained prompt that
-the receiving CLI agent (Kiro, Claude Code, Aider, Goose, OpenCode) will see
+the receiving CLI agent (Kiro, Claude Code, OpenCode, Devin) will see
 as its only context — it does NOT see the Architect's chat with the human.
 
 # Inputs

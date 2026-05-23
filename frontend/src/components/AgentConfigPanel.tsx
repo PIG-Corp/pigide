@@ -9,10 +9,9 @@ const AGENT_TYPES: { value: string; label: string }[] = [
   { value: "", label: "Any agent" },
   { value: "claude", label: "Claude" },
   { value: "kiro-cli", label: "Kiro CLI" },
-  { value: "aider", label: "Aider" },
-  { value: "goose", label: "Goose" },
   { value: "opencode", label: "OpenCode" },
   { value: "devin", label: "Devin" },
+  { value: "agy", label: "Antigravity CLI" },
 ];
 
 /**

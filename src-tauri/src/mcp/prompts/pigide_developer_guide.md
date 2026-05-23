@@ -1,6 +1,6 @@
 # PigIDE Developer Guide
 
-PigIDE is a desktop IDE that hosts multiple interactive CLI agents (Kiro, Claude Code, Aider, Goose, OpenCode) as tiled terminal panes. An LLM orchestrator drives them through the same tool surface you are reading now.
+PigIDE is a desktop IDE that hosts multiple interactive CLI agents (Kiro, Claude Code, OpenCode, Devin) as tiled terminal panes. An LLM orchestrator drives them through the same tool surface you are reading now.
 
 ## Concepts
 

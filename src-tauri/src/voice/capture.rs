@@ -27,6 +27,12 @@ pub struct Capture {
 unsafe impl Send for Capture {}
 unsafe impl Sync for Capture {}
 
+impl Default for Capture {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Capture {
     pub fn new() -> Self {
         Self {
@@ -137,7 +143,12 @@ impl Capture {
                 err_fn,
                 None,
             ),
-            other => return Err(Error::Voice(format!("unsupported sample format: {:?}", other))),
+            other => {
+                return Err(Error::Voice(format!(
+                    "unsupported sample format: {:?}",
+                    other
+                )))
+            }
         }
         .map_err(|e| Error::Voice(format!("build stream: {}", e)))?;
 
@@ -159,7 +170,6 @@ impl Capture {
         let s = self.state.lock();
         Ok((s.samples.clone(), s.source_rate))
     }
-
 }
 
 /// Linear resampler from `src_rate` to 16000 Hz mono.

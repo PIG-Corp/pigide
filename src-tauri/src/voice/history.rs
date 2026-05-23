@@ -80,7 +80,7 @@ pub fn list(db: &DbPool, limit: i64) -> Result<Vec<Transcript>> {
          ORDER BY created_at DESC
          LIMIT ?1",
     )?;
-    let rows = stmt.query_map([limit.max(1).min(500)], |r| {
+    let rows = stmt.query_map([limit.clamp(1, 500)], |r| {
         Ok(Transcript {
             id: r.get(0)?,
             text: r.get(1)?,
@@ -116,7 +116,7 @@ pub fn search(db: &DbPool, query: &str, limit: i64) -> Result<Vec<Transcript>> {
          ORDER BY bm25(voice_transcripts_fts)
          LIMIT ?2",
     )?;
-    let rows = stmt.query_map(rusqlite::params![&q, limit.max(1).min(100)], |r| {
+    let rows = stmt.query_map(rusqlite::params![&q, limit.clamp(1, 100)], |r| {
         Ok(Transcript {
             id: r.get(0)?,
             text: r.get(1)?,

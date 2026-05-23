@@ -28,7 +28,7 @@ impl WorkspaceManager {
         let conn = self.db.get()?;
         let mut stmt = conn.prepare(
             "SELECT w.id, w.name, w.created_at, w.layout_json, w.paths_json,
-                    (SELECT COUNT(*) FROM agents a WHERE a.workspace_id=w.id) as cnt
+                    (SELECT COUNT(*) FROM agents a WHERE a.workspace_id=w.id AND a.status='running') as cnt
              FROM workspaces w
              ORDER BY w.created_at ASC",
         )?;
@@ -45,8 +45,7 @@ impl WorkspaceManager {
         let mut out = Vec::new();
         for row in rows {
             let (id, name, created_at, layout_json, paths_json, cnt) = row?;
-            let layout: LayoutNode = serde_json::from_str(&layout_json)
-                .unwrap_or_default();
+            let layout: LayoutNode = serde_json::from_str(&layout_json).unwrap_or_default();
             let paths: Vec<String> = serde_json::from_str(&paths_json).unwrap_or_default();
             out.push(Workspace {
                 id,
@@ -78,7 +77,7 @@ impl WorkspaceManager {
         let layout: LayoutNode = serde_json::from_str(&layout_json).unwrap_or_default();
         let paths: Vec<String> = serde_json::from_str(&paths_json).unwrap_or_default();
         let cnt: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM agents WHERE workspace_id=?1",
+            "SELECT COUNT(*) FROM agents WHERE workspace_id=?1 AND status='running'",
             [&id],
             |r| r.get(0),
         )?;
@@ -128,9 +127,8 @@ impl WorkspaceManager {
     pub fn prune_stale_layout(&self, id: &str) -> Result<LayoutNode> {
         let mut ws = self.get(id)?;
         let conn = self.db.get()?;
-        let mut stmt = conn.prepare(
-            "SELECT id FROM agents WHERE workspace_id=?1 AND status='running'",
-        )?;
+        let mut stmt =
+            conn.prepare("SELECT id FROM agents WHERE workspace_id=?1 AND status='running'")?;
         let live: std::collections::HashSet<String> = stmt
             .query_map([id], |r| r.get::<_, String>(0))?
             .filter_map(|r| r.ok())

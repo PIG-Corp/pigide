@@ -50,7 +50,7 @@ export const ipc = {
 
   spawnAgent: (
     workspaceId: string,
-    agentType: "kiro-cli" | "claude" | "aider" | "goose" | "opencode" | "devin",
+    agentType: "kiro-cli" | "claude" | "opencode" | "devin" | "agy",
     opts: { cwd?: string | null; count?: number; autoLayout?: boolean } = {},
   ) =>
     invoke<Agent[]>("spawn_agent", {
@@ -245,6 +245,7 @@ export const ipc = {
     }),
 
   listDir: (path: string) => invoke<DirEntry[]>("list_dir", { path }),
+  browseDir: (path: string) => invoke<DirEntry[]>("browse_dir", { path }),
   homeDir: () => invoke<string>("home_dir"),
   readFile: (path: string) => invoke<string>("read_file", { path }),
   writeFile: (path: string, content: string) =>

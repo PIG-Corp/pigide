@@ -169,7 +169,11 @@ pub fn to_api_message(m: &ChatMessage) -> Value {
 
     // For assistant messages that ONLY carry tool calls, send content as null.
     // Anthropic-backed routers reject empty-string content here.
-    let has_tool_calls = m.tool_calls.as_ref().map(|t| !t.is_empty()).unwrap_or(false);
+    let has_tool_calls = m
+        .tool_calls
+        .as_ref()
+        .map(|t| !t.is_empty())
+        .unwrap_or(false);
     let content_value = if m.role == "assistant" && m.content.is_empty() && has_tool_calls {
         Value::Null
     } else {

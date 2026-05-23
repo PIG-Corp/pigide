@@ -2,7 +2,7 @@
 //!
 //! Three sources are checked in increasing precedence:
 //!   1. Built-in   — shipped with the binary at `<exe>/../resources/skills`
-//!                   (or `CARGO_MANIFEST_DIR/resources/skills` at dev time).
+//!      (or `CARGO_MANIFEST_DIR/resources/skills` at dev time).
 //!   2. User       — `~/.pigide/skills/`.
 //!   3. Workspace  — `<workspace.path[0]>/.pigide/skills/`.
 //!
@@ -130,11 +130,11 @@ impl SkillRegistry {
 
         // Build by_id index sorted by precedence (highest first).
         let mut by_id: HashMap<String, Vec<SkillSourceTag>> = HashMap::new();
-        for ((src, id), _) in &by_key {
+        for (src, id) in by_key.keys() {
             by_id.entry(id.clone()).or_default().push(*src);
         }
         for v in by_id.values_mut() {
-            v.sort_by(|a, b| b.precedence().cmp(&a.precedence()));
+            v.sort_by_key(|b| std::cmp::Reverse(b.precedence()));
         }
 
         let mut inner = self.inner.write();
@@ -157,10 +157,8 @@ impl SkillRegistry {
             // Treat as removal: drop matching entry.
             let mut inner = self.inner.write();
             // We need to find which (source, id) had this path.
-            let key_to_drop: Option<(SkillSourceTag, String)> = inner
-                .by_key
-                .iter()
-                .find_map(|((s, id), sk)| {
+            let key_to_drop: Option<(SkillSourceTag, String)> =
+                inner.by_key.iter().find_map(|((s, id), sk)| {
                     if sk.path == path.display().to_string() {
                         Some((*s, id.clone()))
                     } else {
@@ -212,7 +210,7 @@ impl SkillRegistry {
                         .filter(|(_, i)| *i == id_str)
                         .map(|(s, _)| *s)
                         .collect();
-                    sources_for_id.sort_by(|a, b| b.precedence().cmp(&a.precedence()));
+                    sources_for_id.sort_by_key(|b| std::cmp::Reverse(b.precedence()));
                     inner.by_id.insert(id_str, sources_for_id);
                 }
                 Ok(())
@@ -253,11 +251,7 @@ impl SkillRegistry {
                     out.push(SkillEntry {
                         skill: sk.clone(),
                         shadowed_by: None,
-                        override_disabled: inner
-                            .overrides
-                            .get(id)
-                            .copied()
-                            .unwrap_or(false),
+                        override_disabled: inner.overrides.get(id).copied().unwrap_or(false),
                     });
                 }
             }
@@ -268,21 +262,19 @@ impl SkillRegistry {
                     out.push(SkillEntry {
                         skill: sk.clone(),
                         shadowed_by: Some(winner_src),
-                        override_disabled: inner
-                            .overrides
-                            .get(id)
-                            .copied()
-                            .unwrap_or(false),
+                        override_disabled: inner.overrides.get(id).copied().unwrap_or(false),
                     });
                 }
             }
         }
         out.sort_by(|a, b| {
             // Stable: id, then source precedence desc.
-            a.skill
-                .id
-                .cmp(&b.skill.id)
-                .then(b.skill.source.precedence().cmp(&a.skill.source.precedence()))
+            a.skill.id.cmp(&b.skill.id).then(
+                b.skill
+                    .source
+                    .precedence()
+                    .cmp(&a.skill.source.precedence()),
+            )
         });
         out
     }

@@ -44,12 +44,7 @@ pub fn list(db: &DbPool) -> Result<Vec<DictEntry>> {
     Ok(out)
 }
 
-pub fn add(
-    db: &DbPool,
-    pattern: &str,
-    replacement: &str,
-    case_sense: bool,
-) -> Result<DictEntry> {
+pub fn add(db: &DbPool, pattern: &str, replacement: &str, case_sense: bool) -> Result<DictEntry> {
     if pattern.trim().is_empty() {
         return Err(Error::Invalid("pattern required".into()));
     }

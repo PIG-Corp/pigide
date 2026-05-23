@@ -114,7 +114,7 @@ impl ChatQueueWorker {
             let res = self
                 .orch
                 .clone()
-                .run_chat_with_attachments(item.text.clone(), item.attachments.clone())
+                .run_chat(item.text.clone())
                 .await;
             match res {
                 Ok(()) => {

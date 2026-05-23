@@ -59,13 +59,10 @@ pub struct SkillFull {
 /// Load `skills.disabled.<id>` overrides from `settings`.
 pub fn load_overrides(pool: &DbPool) -> Result<HashMap<String, bool>> {
     let conn = pool.get()?;
-    let mut stmt = conn.prepare(
-        "SELECT key, value FROM settings WHERE key LIKE 'skills.disabled.%'",
-    )?;
+    let mut stmt =
+        conn.prepare("SELECT key, value FROM settings WHERE key LIKE 'skills.disabled.%'")?;
     let mut out = HashMap::new();
-    let rows = stmt.query_map([], |r| {
-        Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
-    })?;
+    let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
     for row in rows.flatten() {
         let id = row.0.trim_start_matches("skills.disabled.").to_string();
         out.insert(id, row.1.eq_ignore_ascii_case("true"));

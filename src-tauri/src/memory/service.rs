@@ -97,7 +97,7 @@ impl MemoryService {
         let mut note = Note::new(slug.clone(), title.to_string(), body.to_string());
         note.tags = tags;
         note.aliases = aliases;
-        let path = storage::slug_to_path(&root, &slug);
+        let path = storage::slug_to_path(&root, &slug)?;
         let raw = note::serialize(&note);
         note::write(&path, &raw)?;
         self.upsert_index(&root.to_string_lossy(), &path, &note)?;
@@ -107,9 +107,8 @@ impl MemoryService {
 
     fn unique_slug(&self, root_str: &str, base: String) -> Result<String> {
         let conn = self.db.get()?;
-        let mut stmt = conn.prepare(
-            "SELECT 1 FROM memory_notes WHERE workspace_root=?1 AND slug=?2 LIMIT 1",
-        )?;
+        let mut stmt =
+            conn.prepare("SELECT 1 FROM memory_notes WHERE workspace_root=?1 AND slug=?2 LIMIT 1")?;
         let mut s = base.clone();
         let mut n: u32 = 2;
         loop {
@@ -125,12 +124,7 @@ impl MemoryService {
         }
     }
 
-    fn upsert_index(
-        &self,
-        root_str: &str,
-        path: &std::path::Path,
-        note: &Note,
-    ) -> Result<()> {
+    fn upsert_index(&self, root_str: &str, path: &std::path::Path, note: &Note) -> Result<()> {
         let mtime = std::fs::metadata(path)
             .ok()
             .and_then(|m| m.modified().ok())
@@ -209,11 +203,7 @@ impl MemoryService {
                 links::Resolution::Unresolved => (None, 0),
             };
             insert.execute(rusqlite::params![
-                &note.id,
-                &dst_id,
-                &r.target,
-                &r.display,
-                ambiguous
+                &note.id, &dst_id, &r.target, &r.display, ambiguous
             ])?;
         }
         Ok(())
@@ -272,7 +262,8 @@ impl MemoryService {
             [id],
             |r| Ok((r.get(0)?, r.get(1)?)),
         )?;
-        let path = PathBuf::from(&path_str);
+        let path =
+            crate::files::validate_workspace_write_path(&path_str, &[PathBuf::from(&root_str)])?;
         let raw = note::serialize(&note);
         note::write(&path, &raw)?;
         self.upsert_index(&root_str, &path, &note)?;
@@ -282,19 +273,33 @@ impl MemoryService {
 
     pub fn delete(&self, id: &str) -> Result<()> {
         let conn = self.db.get()?;
-        let path: Option<String> = conn
-            .query_row("SELECT path FROM memory_notes WHERE id=?1", [id], |r| {
-                r.get::<_, String>(0)
-            })
+        let stored_path: Option<(String, String)> = conn
+            .query_row(
+                "SELECT workspace_root, path FROM memory_notes WHERE id=?1",
+                [id],
+                |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)),
+            )
             .ok();
         conn.execute("DELETE FROM memory_notes WHERE id=?1", [id])?;
-        if let Some(p) = path {
-            let _ = std::fs::remove_file(&p);
+        if let Some((root, path)) = stored_path {
+            match crate::files::validate_existing_workspace_path(&path, &[PathBuf::from(root)]) {
+                Ok(p) => {
+                    let _ = std::fs::remove_file(p);
+                }
+                Err(e) => {
+                    tracing::warn!(note_id = %id, "skipping unsafe memory file delete: {}", e);
+                }
+            }
         }
         Ok(())
     }
 
-    pub fn list(&self, workspace_id: &str, tag: Option<&str>, limit: i64) -> Result<Vec<NoteSummary>> {
+    pub fn list(
+        &self,
+        workspace_id: &str,
+        tag: Option<&str>,
+        limit: i64,
+    ) -> Result<Vec<NoteSummary>> {
         let root = self.root_for(workspace_id)?;
         let root_str = root.to_string_lossy().to_string();
         let conn = self.db.get()?;
@@ -305,20 +310,17 @@ impl MemoryService {
              ORDER BY updated_at DESC
              LIMIT ?2",
         )?;
-        let rows = stmt.query_map(
-            rusqlite::params![&root_str, limit.max(1).min(500)],
-            |r| {
-                let tags_json: String = r.get(3)?;
-                let tags: Vec<String> = serde_json::from_str(&tags_json).unwrap_or_default();
-                Ok(NoteSummary {
-                    id: r.get(0)?,
-                    slug: r.get(1)?,
-                    title: r.get(2)?,
-                    tags,
-                    updated_at: r.get(4)?,
-                })
-            },
-        )?;
+        let rows = stmt.query_map(rusqlite::params![&root_str, limit.clamp(1, 500)], |r| {
+            let tags_json: String = r.get(3)?;
+            let tags: Vec<String> = serde_json::from_str(&tags_json).unwrap_or_default();
+            Ok(NoteSummary {
+                id: r.get(0)?,
+                slug: r.get(1)?,
+                title: r.get(2)?,
+                tags,
+                updated_at: r.get(4)?,
+            })
+        })?;
         let mut out = Vec::new();
         for row in rows {
             let s = row?;
@@ -350,19 +352,16 @@ impl MemoryService {
              ORDER BY bm25(memory_fts, 4.0, 1.0, 2.0, 1.5)
              LIMIT ?3",
         )?;
-        let rows = stmt.query_map(
-            rusqlite::params![&root_str, &q, limit.max(1).min(50)],
-            |r| {
-                Ok(SearchHit {
-                    id: r.get(0)?,
-                    slug: r.get(1)?,
-                    title: r.get(2)?,
-                    snippet: r.get(3)?,
-                    // bm25 returns negative scores (lower = better). Flip.
-                    score: -r.get::<_, f64>(4)?,
-                })
-            },
-        )?;
+        let rows = stmt.query_map(rusqlite::params![&root_str, &q, limit.clamp(1, 50)], |r| {
+            Ok(SearchHit {
+                id: r.get(0)?,
+                slug: r.get(1)?,
+                title: r.get(2)?,
+                snippet: r.get(3)?,
+                // bm25 returns negative scores (lower = better). Flip.
+                score: -r.get::<_, f64>(4)?,
+            })
+        })?;
         let mut out = Vec::new();
         for row in rows {
             out.push(row?);
@@ -410,7 +409,13 @@ impl MemoryService {
             Some(r) => r,
             None => return Ok(Vec::new()),
         };
-        let q_clean = sanitize_fts_query(&q);
+        let mut q_clean = sanitize_fts_query(&q);
+        if q_clean == "x" {
+            q_clean = sanitize_fts_query(&note.title);
+            if q_clean == "x" {
+                return Ok(Vec::new());
+            }
+        }
         let conn = self.db.get()?;
         let mut stmt = conn.prepare(
             "SELECT n.id, n.slug, n.title,
@@ -423,25 +428,22 @@ impl MemoryService {
              ORDER BY bm25(memory_fts, 4.0, 1.0, 2.0, 1.5)
              LIMIT ?4",
         )?;
-        let take = limit.max(1).min(20) as i64;
+        let take = limit.clamp(1, 20);
         let self_tags: std::collections::HashSet<String> = note.tags.into_iter().collect();
-        let rows = stmt.query_map(
-            rusqlite::params![&root, id, &q_clean, take],
-            |r| {
-                let tags_json: String = r.get(5)?;
-                let tags: Vec<String> = serde_json::from_str(&tags_json).unwrap_or_default();
-                Ok((
-                    SearchHit {
-                        id: r.get(0)?,
-                        slug: r.get(1)?,
-                        title: r.get(2)?,
-                        snippet: r.get(3)?,
-                        score: -r.get::<_, f64>(4)?,
-                    },
-                    tags,
-                ))
-            },
-        )?;
+        let rows = stmt.query_map(rusqlite::params![&root, id, &q_clean, take], |r| {
+            let tags_json: String = r.get(5)?;
+            let tags: Vec<String> = serde_json::from_str(&tags_json).unwrap_or_default();
+            Ok((
+                SearchHit {
+                    id: r.get(0)?,
+                    slug: r.get(1)?,
+                    title: r.get(2)?,
+                    snippet: r.get(3)?,
+                    score: -r.get::<_, f64>(4)?,
+                },
+                tags,
+            ))
+        })?;
         let mut hits: Vec<SearchHit> = Vec::new();
         for row in rows {
             let (mut h, tags) = row?;
@@ -449,7 +451,11 @@ impl MemoryService {
             h.score += 0.3 * overlap;
             hits.push(h);
         }
-        hits.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        hits.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         Ok(hits)
     }
 
@@ -555,9 +561,12 @@ impl MemoryService {
 fn extract_context(body: &str, _dst_id: &str, _pool: &DbPool) -> Option<String> {
     // Take the first 160 chars around the first wikilink as a cheap context.
     let first = body.find("[[")?;
-    let end = body[first..].find("]]").map(|e| first + e + 2).unwrap_or(body.len());
-    let lo = first.saturating_sub(80);
-    let hi = (end + 80).min(body.len());
+    let end = body[first..]
+        .find("]]")
+        .map(|e| first + e + 2)
+        .unwrap_or(body.len());
+    let lo = body.floor_char_boundary(first.saturating_sub(80));
+    let hi = body.floor_char_boundary((end + 80).min(body.len()));
     Some(body[lo..hi].replace('\n', " "))
 }
 
@@ -574,15 +583,51 @@ fn sanitize_fts_query(q: &str) -> String {
             }
         })
         .collect();
-    let toks: Vec<String> = cleaned
-        .split_whitespace()
-        .filter(|s| s.len() >= 2)
-        .map(|s| s.to_lowercase())
-        .collect();
-    if toks.is_empty() {
+
+    let mut positives = Vec::new();
+    let mut negatives = Vec::new();
+    let mut has_positive = false;
+
+    for raw_tok in cleaned.split_whitespace() {
+        let trimmed = raw_tok.trim_matches('-');
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        if raw_tok.starts_with('-') {
+            if has_positive {
+                for part in trimmed.split('-') {
+                    if part.len() >= 2 {
+                        negatives.push(part.to_lowercase());
+                    }
+                }
+            } else {
+                for part in trimmed.split('-') {
+                    if part.len() >= 2 {
+                        positives.push(part.to_lowercase());
+                        has_positive = true;
+                    }
+                }
+            }
+        } else {
+            for part in raw_tok.split('-') {
+                if part.len() >= 2 {
+                    positives.push(part.to_lowercase());
+                    has_positive = true;
+                }
+            }
+        }
+    }
+
+    if positives.is_empty() {
         "x".to_string()
     } else {
-        toks.join(" OR ")
+        let pos_str = positives.join(" OR ");
+        if negatives.is_empty() {
+            pos_str
+        } else {
+            format!("{} NOT {}", pos_str, negatives.join(" NOT "))
+        }
     }
 }
 
@@ -593,7 +638,6 @@ mod tests {
     #[test]
     fn sanitize_strips_operators() {
         let q = sanitize_fts_query("hello: \"world\" AND go!");
-        // Should produce a clean OR-joined token list, all lowercase.
         assert!(q.contains(" OR "));
         assert!(!q.contains('"'));
         assert!(!q.contains(':'));
@@ -602,5 +646,23 @@ mod tests {
     #[test]
     fn sanitize_handles_empty() {
         assert_eq!(sanitize_fts_query(""), "x");
+    }
+
+    #[test]
+    fn sanitize_strips_hyphen_not_operator() {
+        let q = sanitize_fts_query("-test");
+        assert_eq!(q, "test");
+    }
+
+    #[test]
+    fn sanitize_strips_leading_hyphen_tokens() {
+        let q = sanitize_fts_query("hello -world --backend");
+        assert_eq!(q, "hello NOT world NOT backend");
+    }
+
+    #[test]
+    fn sanitize_preserves_underscores() {
+        let q = sanitize_fts_query("my_func other_thing");
+        assert_eq!(q, "my_func OR other_thing");
     }
 }

@@ -2,7 +2,7 @@
 
 use crate::error::{Error, Result};
 use crate::workspace::WorkspaceManager;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 const MEMORY_DIR: &str = ".pigmemory";
 
@@ -20,8 +20,7 @@ pub fn resolve_root(ws_mgr: &WorkspaceManager, workspace_id: &str) -> Result<Pat
         return Ok(PathBuf::from(p).join(MEMORY_DIR));
     }
     // Fallback under XDG config.
-    let base =
-        dirs::config_dir().ok_or_else(|| Error::Other("config dir unavailable".into()))?;
+    let base = dirs::config_dir().ok_or_else(|| Error::Other("config dir unavailable".into()))?;
     Ok(base.join("pigide").join("memory").join(workspace_id))
 }
 
@@ -30,14 +29,31 @@ pub fn ensure_root(root: &std::path::Path) -> Result<()> {
     Ok(())
 }
 
-/// Convert a slug into an absolute file path under `root`.
-pub fn slug_to_path(root: &std::path::Path, slug: &str) -> PathBuf {
-    let mut p = root.to_path_buf();
-    for seg in slug.split('/') {
-        p.push(seg);
-    }
+pub fn slug_to_path(root: &Path, slug: &str) -> Result<PathBuf> {
+    validate_slug(slug)?;
+    let base = root.canonicalize()?;
+    let mut p = base.join(slug);
     p.set_extension("md");
-    p
+    if !p.starts_with(&base) {
+        return Err(Error::Invalid(format!(
+            "slug escapes memory root: {}",
+            slug
+        )));
+    }
+    Ok(p)
+}
+
+fn validate_slug(slug: &str) -> Result<()> {
+    if slug.is_empty()
+        || slug == "."
+        || slug.contains("..")
+        || slug.contains('/')
+        || slug.contains('\\')
+        || slug.contains('\0')
+    {
+        return Err(Error::Invalid(format!("invalid memory slug: {}", slug)));
+    }
+    Ok(())
 }
 
 /// Recover slug from absolute path, given the root.
@@ -45,7 +61,11 @@ pub fn path_to_slug(root: &std::path::Path, path: &std::path::Path) -> Option<St
     let rel = path.strip_prefix(root).ok()?;
     let rel_no_ext = rel.with_extension("");
     let s = rel_no_ext.to_string_lossy().replace('\\', "/");
-    if s.is_empty() { None } else { Some(s) }
+    if s.is_empty() {
+        None
+    } else {
+        Some(s)
+    }
 }
 
 /// Make a kebab-case slug from a free-form title.
@@ -56,19 +76,41 @@ pub fn slugify(title: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::Path;
-
     #[test]
     fn slug_round_trip() {
-        let root = Path::new("/tmp/x/.pigmemory");
-        let p = slug_to_path(root, "decisions/auth-pattern");
-        assert_eq!(p, Path::new("/tmp/x/.pigmemory/decisions/auth-pattern.md"));
-        let back = path_to_slug(root, &p).unwrap();
-        assert_eq!(back, "decisions/auth-pattern");
+        let root = tempdir_for_test("pigide-memory-roundtrip");
+        let p = slug_to_path(&root, "auth-pattern").unwrap();
+        assert_eq!(p, root.join("auth-pattern.md"));
+        let back = path_to_slug(&root, &p).unwrap();
+        assert_eq!(back, "auth-pattern");
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn slug_rejects_traversal() {
+        let root = tempdir_for_test("pigide-memory-traversal");
+        let err = slug_to_path(&root, "../../etc/cron.d/backdoor").unwrap_err();
+        assert!(err.to_string().contains("invalid memory slug"));
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn slug_rejects_path_separators_and_dot_segments() {
+        let root = tempdir_for_test("pigide-memory-separators");
+        assert!(slug_to_path(&root, "nested/hidden").is_err());
+        assert!(slug_to_path(&root, r"nested\hidden").is_err());
+        assert!(slug_to_path(&root, ".").is_err());
+        std::fs::remove_dir_all(root).ok();
     }
 
     #[test]
     fn slugify_strips_punctuation() {
         assert_eq!(slugify("Auth Pattern!"), "auth-pattern");
+    }
+
+    fn tempdir_for_test(label: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("{}-{}", label, uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
     }
 }

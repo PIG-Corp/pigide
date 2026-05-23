@@ -5,7 +5,7 @@
 //! no signals.
 
 use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 /// Aggregated metadata extracted from a single project root.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -67,9 +67,7 @@ const PROJECT_MARKERS: &[&str] = &[
 
 /// True if `dir` looks like a project root.
 pub fn is_project_root(dir: &Path) -> bool {
-    PROJECT_MARKERS
-        .iter()
-        .any(|m| dir.join(m).exists())
+    PROJECT_MARKERS.iter().any(|m| dir.join(m).exists())
 }
 
 /// Run every applicable parser against `dir` and merge their output.
@@ -175,10 +173,7 @@ fn parse_pyproject(dir: &Path) -> Option<ProjectSignals> {
             section = Some(rest.to_string());
             continue;
         }
-        let in_meta = matches!(
-            section.as_deref(),
-            Some("project") | Some("tool.poetry")
-        );
+        let in_meta = matches!(section.as_deref(), Some("project") | Some("tool.poetry"));
         if !in_meta {
             continue;
         }
@@ -301,7 +296,10 @@ fn trim_assign(line: &str, key: &str) -> Option<String> {
     let line = line.split('#').next().unwrap_or(line).trim();
     let rest = line.strip_prefix(key)?.trim_start();
     let rest = rest.strip_prefix('=')?.trim();
-    let v = rest.trim_matches(|c| c == '"' || c == '\'').trim().to_string();
+    let v = rest
+        .trim_matches(|c| c == '"' || c == '\'')
+        .trim()
+        .to_string();
     if v.is_empty() {
         None
     } else {
@@ -314,7 +312,10 @@ fn trim_yaml(line: &str, key: &str) -> Option<String> {
     let line = line.split('#').next().unwrap_or(line).trim();
     let rest = line.strip_prefix(key)?.trim_start();
     let rest = rest.strip_prefix(':')?.trim();
-    let v = rest.trim_matches(|c| c == '"' || c == '\'').trim().to_string();
+    let v = rest
+        .trim_matches(|c| c == '"' || c == '\'')
+        .trim()
+        .to_string();
     if v.is_empty() {
         None
     } else {
@@ -338,7 +339,7 @@ pub fn remote_repo_name(remote: &str) -> Option<String> {
 }
 
 /// Convenience constructor used by tests in higher modules.
-pub fn parse_dir(dir: &PathBuf) -> ProjectSignals {
+pub fn parse_dir(dir: &Path) -> ProjectSignals {
     parse_all(dir)
 }
 
@@ -347,12 +348,11 @@ mod tests {
     use super::*;
     use std::fs;
     use std::io::Write;
+    use std::path::PathBuf;
 
     fn tmp() -> PathBuf {
-        let p = std::env::temp_dir().join(format!(
-            "pigide-resolver-parsers-{}",
-            uuid::Uuid::new_v4()
-        ));
+        let p =
+            std::env::temp_dir().join(format!("pigide-resolver-parsers-{}", uuid::Uuid::new_v4()));
         fs::create_dir_all(&p).unwrap();
         p
     }
@@ -376,8 +376,7 @@ mod tests {
     fn cargo_toml_pkg() {
         let d = tmp();
         let mut f = fs::File::create(d.join("Cargo.toml")).unwrap();
-        writeln!(f, "[package]\nname = \"my_crate\"\ndescription = \"crate\"")
-            .unwrap();
+        writeln!(f, "[package]\nname = \"my_crate\"\ndescription = \"crate\"").unwrap();
         let s = parse_all(&d);
         assert!(s.names.contains(&"my_crate".to_string()));
         assert!(s.descriptions.contains(&"crate".to_string()));

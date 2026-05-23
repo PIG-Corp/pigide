@@ -1,7 +1,6 @@
 //! PigMCP HTTP/JSON-RPC server.
 //!
-//! Single endpoint `POST /mcp`. Bearer auth via `Authorization` header or
-//! `?apiKey=` query. Methods:
+//! Single endpoint `POST /mcp`. Bearer auth via `Authorization` header. Methods:
 //!   - `initialize` — returns server info + capabilities.
 //!   - `tools/list` — returns the orchestrator tool registry as MCP-shaped tools.
 //!   - `tools/call` — runs a single tool through the orchestrator dispatcher.
@@ -18,7 +17,7 @@ use crate::orchestrator::tools as orch_tools;
 use crate::tasks::TaskManager;
 use crate::workspace::WorkspaceManager;
 use axum::{
-    extract::{Query, State},
+    extract::State,
     http::{HeaderMap, StatusCode},
     response::IntoResponse,
     routing::{get, post},
@@ -34,6 +33,7 @@ use tokio::task::JoinHandle;
 use uuid::Uuid;
 
 const PIGIDE_DEVELOPER_GUIDE: &str = include_str!("prompts/pigide_developer_guide.md");
+const MCP_MAX_BODY_BYTES: usize = 10_485_760;
 
 /// Tools that mutate state and so require the `mutate` scope at minimum.
 fn is_mutating(name: &str) -> bool {
@@ -56,6 +56,14 @@ fn is_mutating(name: &str) -> bool {
             | "broadcast"
             | "mark_mail_read"
             | "start_rollcall"
+            | "claim_files"
+            | "release_files"
+            | "open_review_gate"
+            | "vote_review_gate"
+            | "open_project"
+            | "remember_project_alias"
+            | "rebuild_project_index"
+            | "wait_for_agent_idle"
     )
 }
 
@@ -63,11 +71,7 @@ fn is_mutating(name: &str) -> bool {
 fn is_dangerous(name: &str) -> bool {
     matches!(
         name,
-        "spawn_agent"
-            | "send_to_agent"
-            | "delete_workspace"
-            | "delete_memory"
-            | "delete_task"
+        "spawn_agent" | "send_to_agent" | "delete_workspace" | "delete_memory" | "delete_task"
     )
 }
 
@@ -124,13 +128,14 @@ pub async fn start(
     let app = Router::new()
         .route("/mcp", post(handle_rpc))
         .route("/healthz", get(|| async { "ok" }))
+        .layer(axum::extract::DefaultBodyLimit::max(MCP_MAX_BODY_BYTES))
         .with_state(state);
-    let listener = tokio::net::TcpListener::bind(bind).await.map_err(|e| {
-        crate::error::Error::Other(format!("MCP bind {}: {}", bind, e))
-    })?;
-    let addr = listener.local_addr().map_err(|e| {
-        crate::error::Error::Other(format!("MCP local_addr: {}", e))
-    })?;
+    let listener = tokio::net::TcpListener::bind(bind)
+        .await
+        .map_err(|e| crate::error::Error::Other(format!("MCP bind {}: {}", bind, e)))?;
+    let addr = listener
+        .local_addr()
+        .map_err(|e| crate::error::Error::Other(format!("MCP local_addr: {}", e)))?;
     let (tx, rx) = tokio::sync::oneshot::channel::<()>();
     let join = tokio::spawn(async move {
         let _ = axum::serve(listener, app)
@@ -149,12 +154,6 @@ pub async fn start(
 }
 
 #[derive(Deserialize)]
-struct AuthQuery {
-    #[serde(rename = "apiKey")]
-    api_key: Option<String>,
-}
-
-#[derive(Deserialize)]
 struct JsonRpcRequest {
     #[serde(default)]
     jsonrpc: String,
@@ -164,27 +163,29 @@ struct JsonRpcRequest {
     params: Value,
 }
 
-fn extract_token(headers: &HeaderMap, q: &AuthQuery) -> Option<String> {
+fn extract_token(headers: &HeaderMap) -> Option<String> {
     if let Some(h) = headers.get("authorization").and_then(|v| v.to_str().ok()) {
-        if let Some(rest) = h.strip_prefix("Bearer ").or_else(|| h.strip_prefix("bearer ")) {
+        if let Some(rest) = h
+            .strip_prefix("Bearer ")
+            .or_else(|| h.strip_prefix("bearer "))
+        {
             return Some(rest.trim().to_string());
         }
     }
-    q.api_key.clone()
+    None
 }
 
 async fn handle_rpc(
     State(state): State<McpState>,
-    Query(q): Query<AuthQuery>,
     headers: HeaderMap,
     Json(req): Json<JsonRpcRequest>,
 ) -> impl IntoResponse {
-    if req.jsonrpc != "2.0" && !req.jsonrpc.is_empty() {
+    if req.jsonrpc != "2.0" {
         return error_response(req.id, -32600, "invalid jsonrpc version");
     }
 
     // Auth: every method except `initialize` requires a key.
-    let presented = extract_token(&headers, &q);
+    let presented = extract_token(&headers);
     let key: Option<KeyInfo> = match presented {
         Some(t) => match auth::validate(&state.db, &t) {
             Ok(k) => k,
@@ -287,7 +288,7 @@ fn tools_list_response() -> Value {
         tools.push(json!({
             "name": "watcher_status",
             "description": "Per-agent Watcher (Gemini supervisor) stats: \
-last_classification, calls_this_minute, blocked_until, dropped.",
+        last_classification, calls_this_minute, blocked_until, dropped.",
             "inputSchema": {"type": "object", "properties": {}, "required": []}
         }));
     }
@@ -332,7 +333,7 @@ async fn dispatch_tool(
                 "rpm": 0,
                 "agents": {},
                 "note": "watcher feature compiled but disabled at boot \
-(check GEMINI_API_KEY)"
+            (check GEMINI_API_KEY)"
             }),
         };
         audit(&state.db, key.as_ref(), &name, &arguments, "ok");
@@ -365,14 +366,20 @@ async fn dispatch_tool(
         }
         Err(e) => {
             let msg = e.to_string();
-            audit(&state.db, key.as_ref(), &name, &arguments, &format!("err:{}", msg));
+            audit(
+                &state.db,
+                key.as_ref(),
+                &name,
+                &arguments,
+                &format!("err:{}", msg),
+            );
             Err((-32603, msg))
         }
     }
 }
 
 fn audit(db: &DbPool, key: Option<&KeyInfo>, tool: &str, args: &Value, status: &str) {
-    let _ = (|| -> Result<()> {
+    if let Err(e) = (|| -> Result<()> {
         let conn = db.get()?;
         conn.execute(
             "INSERT INTO mcp_audit(id, key_id, tool, args_json, result_status, created_at)
@@ -387,8 +394,35 @@ fn audit(db: &DbPool, key: Option<&KeyInfo>, tool: &str, args: &Value, status: &
             ],
         )?;
         Ok(())
-    })();
+    })() {
+        tracing::warn!("mcp audit insert failed: {}", e);
+    }
 }
 
 #[allow(dead_code)]
 fn _hint_unused(_h: HashMap<String, String>) {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mutating_scope_includes_security_sensitive_tools() {
+        for tool in [
+            "claim_files",
+            "release_files",
+            "open_review_gate",
+            "vote_review_gate",
+            "open_project",
+            "remember_project_alias",
+            "rebuild_project_index",
+        ] {
+            assert!(is_mutating(tool), "{tool} must require mutate scope");
+        }
+    }
+
+    #[test]
+    fn mcp_body_limit_is_10mb() {
+        assert_eq!(MCP_MAX_BODY_BYTES, 10_485_760);
+    }
+}

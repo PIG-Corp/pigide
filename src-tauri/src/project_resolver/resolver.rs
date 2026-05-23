@@ -101,14 +101,13 @@ pub fn resolve(query: &str, idx: &ProjectIndex, ctx: &ResolveContext<'_>) -> Res
 
     let status = if top1 < NOT_FOUND_THRESHOLD {
         ResolveStatus::NotFound
-    } else if exact_count == 1
+    } else if (exact_count == 1
         && scored
             .first()
             .map(|c| normalize(&c.dirname) == q_norm)
-            .unwrap_or(false)
+            .unwrap_or(false))
+        || (top1 >= FOUND_THRESHOLD && (top1 - top2) >= FOUND_GAP)
     {
-        ResolveStatus::Found
-    } else if top1 >= FOUND_THRESHOLD && (top1 - top2) >= FOUND_GAP {
         ResolveStatus::Found
     } else {
         ResolveStatus::Ambiguous
@@ -180,8 +179,8 @@ fn score_project(q_norm: &str, p: &ProjectEntry, ctx: &ResolveContext<'_>) -> Ca
     }
 
     let mut score = best + alias_boost;
-    if alias_label.is_some() {
-        matched_signal = alias_label.unwrap();
+    if let Some(label) = alias_label {
+        matched_signal = label;
     }
 
     // Recent workspace boost — tilts ties toward something the user has

@@ -18,6 +18,10 @@ path = "src/main.rs"
 name = "pigide-cli"
 path = "src/bin/pigide-cli.rs"
 
+[[bin]]
+name = "pigide-agentd"
+path = "src/bin/pigide-agentd.rs"
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
@@ -67,7 +71,7 @@ url = "2"
 dotenvy = "0.15"
 
 [features]
-default = ["custom-protocol", "gpu-cuda", "watcher"]
+default = ["custom-protocol", "watcher"]
 custom-protocol = ["tauri/custom-protocol"]
 # GPU backends for Whisper. Pick at most one. Default build is gpu-cuda.
 #   gpu-cuda     — NVIDIA, requires CUDA toolkit (libcublas, libcudart, nvcc)
@@ -86,3 +90,4 @@ watcher = []
 [dev-dependencies]
 wiremock = "0.6"
 tokio-test = "0.4"
+tempfile = "3"

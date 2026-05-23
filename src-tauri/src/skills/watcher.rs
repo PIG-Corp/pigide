@@ -48,14 +48,8 @@ pub fn spawn_all(
                         return;
                     }
                 };
-                if let Err(e) =
-                    deb.watcher().watch(&root, RecursiveMode::Recursive)
-                {
-                    tracing::warn!(
-                        "skills watcher: watch {} failed: {}",
-                        root.display(),
-                        e
-                    );
+                if let Err(e) = deb.watcher().watch(&root, RecursiveMode::Recursive) {
+                    tracing::warn!("skills watcher: watch {} failed: {}", root.display(), e);
                     return;
                 }
                 tracing::info!("skills watcher attached to {}", root.display());

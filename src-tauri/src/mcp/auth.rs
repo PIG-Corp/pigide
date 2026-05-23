@@ -116,7 +116,10 @@ pub fn validate(db: &DbPool, presented: &str) -> Result<Option<KeyInfo>> {
     let info = KeyInfo {
         id: row.get(0)?,
         label: row.get(1)?,
-        scopes: scopes_str.split(',').map(|s| s.trim().to_string()).collect(),
+        scopes: scopes_str
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .collect(),
         created_at: row.get(3)?,
         last_used_at: row.get(4)?,
     };

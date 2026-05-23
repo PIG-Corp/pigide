@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "../state/store";
 import { ipc } from "../state/ipc";
 import type { Backlink, Note, NoteSummary, SearchHit } from "../state/types";
@@ -28,6 +28,7 @@ export function MemoryPanel({ onClose }: { onClose?: () => void }) {
   const [creating, setCreating] = useState(false);
   const [newTitle, setNewTitle] = useState("");
   const [mode, setMode] = useState<Mode>("list");
+  const isDirty = useRef(false);
 
   const reload = async () => {
     if (!currentId) {
@@ -74,6 +75,10 @@ export function MemoryPanel({ onClose }: { onClose?: () => void }) {
   };
 
   const open = async (id: string) => {
+    if (isDirty.current && openId !== id) {
+      if (!confirm("Unsaved changes will be lost. Continue?")) return;
+    }
+    isDirty.current = false;
     setOpenId(id);
     try {
       const n = await ipc.readMemory(id);
@@ -93,6 +98,7 @@ export function MemoryPanel({ onClose }: { onClose?: () => void }) {
   };
 
   const closeNote = () => {
+    isDirty.current = false;
     setOpenId(null);
     setOpenNote(null);
     setBacklinks([]);
@@ -112,6 +118,7 @@ export function MemoryPanel({ onClose }: { onClose?: () => void }) {
         body: draftBody,
         tags,
       });
+      isDirty.current = false;
       setOpenNote(n);
       reload();
     } catch (err) {
@@ -180,13 +187,15 @@ export function MemoryPanel({ onClose }: { onClose?: () => void }) {
         <span className="memory-count">{visible.length}</span>
         <span className="spacer" />
         <button
+          type="button"
           className={mode === "graph" ? "active" : ""}
           onClick={() => setMode((m) => (m === "graph" ? "list" : "graph"))}
           title="Toggle graph view"
+          aria-pressed={mode === "graph"}
         >
           {mode === "graph" ? "List" : "Graph"}
         </button>
-        <button onClick={() => setCreating((v) => !v)} title="New note">
+        <button type="button" onClick={() => setCreating((v) => !v)} title="New note" aria-expanded={creating}>
           + New
         </button>
         {onClose ? (
@@ -250,6 +259,10 @@ export function MemoryPanel({ onClose }: { onClose?: () => void }) {
                 key={n.id}
                 className={`memory-item ${openId === n.id ? "active" : ""}`}
                 onClick={() => open(n.id)}
+                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(n.id); } }}
+                role="button"
+                tabIndex={0}
+                aria-current={openId === n.id ? "true" : undefined}
               >
                 <div className="memory-item-title">{n.title}</div>
                 <div className="memory-item-slug">{n.slug}</div>
@@ -288,17 +301,17 @@ export function MemoryPanel({ onClose }: { onClose?: () => void }) {
           </div>
           <input
             value={draftTitle}
-            onChange={(e) => setDraftTitle(e.target.value)}
+            onChange={(e) => { isDirty.current = true; setDraftTitle(e.target.value); }}
             placeholder="Title"
           />
           <input
             value={draftTags}
-            onChange={(e) => setDraftTags(e.target.value)}
+            onChange={(e) => { isDirty.current = true; setDraftTags(e.target.value); }}
             placeholder="Tags (comma-separated)"
           />
           <textarea
             value={draftBody}
-            onChange={(e) => setDraftBody(e.target.value)}
+            onChange={(e) => { isDirty.current = true; setDraftBody(e.target.value); }}
             placeholder="Body — supports [[wikilinks]]"
             rows={10}
           />
@@ -310,6 +323,9 @@ export function MemoryPanel({ onClose }: { onClose?: () => void }) {
                   key={b.src_id}
                   className="memory-backlink"
                   onClick={() => open(b.src_id)}
+                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(b.src_id); } }}
+                  role="button"
+                  tabIndex={0}
                 >
                   <span className="memory-backlink-title">{b.src_title}</span>
                   <span className="memory-backlink-context">{b.context}</span>
@@ -325,6 +341,9 @@ export function MemoryPanel({ onClose }: { onClose?: () => void }) {
                   key={r.id}
                   className="memory-backlink"
                   onClick={() => open(r.id)}
+                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(r.id); } }}
+                  role="button"
+                  tabIndex={0}
                 >
                   <span className="memory-backlink-title">{r.title}</span>
                   <span

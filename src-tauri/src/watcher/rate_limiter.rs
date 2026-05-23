@@ -124,7 +124,7 @@ mod tests {
     #[test]
     fn blocked_for_returns_nonzero_when_empty() {
         let b = TokenBucket::new(60); // 1 token/sec
-        // Drain.
+                                      // Drain.
         for _ in 0..60 {
             let _ = b.try_acquire();
         }

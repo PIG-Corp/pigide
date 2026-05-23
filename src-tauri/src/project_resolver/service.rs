@@ -6,12 +6,8 @@
 use crate::db::DbPool;
 use crate::error::{Error, Result};
 use crate::project_resolver::aliases;
-use crate::project_resolver::indexer::{
-    self, ProjectEntry, ProjectIndex, ScanOptions,
-};
-use crate::project_resolver::resolver::{
-    self, ResolveContext, ResolveOutcome,
-};
+use crate::project_resolver::indexer::{self, ProjectEntry, ProjectIndex, ScanOptions};
+use crate::project_resolver::resolver::{self, ResolveContext, ResolveOutcome};
 use crate::workspace::WorkspaceManager;
 use parking_lot::RwLock;
 use std::path::{Path, PathBuf};
@@ -228,10 +224,8 @@ mod tests {
         let db = fresh_db();
         let ws = Arc::new(WorkspaceManager::new(db.clone()));
 
-        let dir = std::env::temp_dir().join(format!(
-            "pigide-resolver-svc-{}",
-            uuid::Uuid::new_v4()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("pigide-resolver-svc-{}", uuid::Uuid::new_v4()));
         fs::create_dir_all(&dir).unwrap();
         // One real project on disk.
         let proj = dir.join("drugs-tracker-plugin");
@@ -252,11 +246,17 @@ mod tests {
         });
         let r = svc.resolve("наркотики", None);
         // Without an alias the cyrillic query won't find it.
-        assert!(matches!(r.status, crate::project_resolver::ResolveStatus::NotFound));
+        assert!(matches!(
+            r.status,
+            crate::project_resolver::ResolveStatus::NotFound
+        ));
 
         svc.add_alias(&proj, "наркотики").unwrap();
         let r2 = svc.resolve("наркотики", None);
-        assert!(matches!(r2.status, crate::project_resolver::ResolveStatus::Found));
+        assert!(matches!(
+            r2.status,
+            crate::project_resolver::ResolveStatus::Found
+        ));
 
         fs::remove_dir_all(&dir).ok();
     }

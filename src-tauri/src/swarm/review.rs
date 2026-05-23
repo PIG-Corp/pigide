@@ -54,11 +54,7 @@ pub struct ReviewGate {
 
 /// Open a fresh review gate on a task. Multiple gates can be opened on the
 /// same task — the Coordinator chooses how many reviewers must pass.
-pub fn open(
-    db: &DbPool,
-    task_id: &str,
-    reviewer_id: Option<&str>,
-) -> Result<ReviewGate> {
+pub fn open(db: &DbPool, task_id: &str, reviewer_id: Option<&str>) -> Result<ReviewGate> {
     if task_id.trim().is_empty() {
         return Err(Error::Invalid("task_id required".into()));
     }
@@ -81,12 +77,7 @@ pub fn open(
     })
 }
 
-pub fn vote(
-    db: &DbPool,
-    gate_id: &str,
-    verdict: Verdict,
-    reason: &str,
-) -> Result<ReviewGate> {
+pub fn vote(db: &DbPool, gate_id: &str, verdict: Verdict, reason: &str) -> Result<ReviewGate> {
     let ts = Utc::now().to_rfc3339();
     let conn = db.get()?;
     let n = conn.execute(
@@ -168,7 +159,11 @@ pub fn task_completable(db: &DbPool, task_id: &str) -> Result<()> {
                 blockers.push(format!(
                     "gate {} FAIL: {}",
                     g.id,
-                    if g.reason.is_empty() { "(no reason)" } else { &g.reason }
+                    if g.reason.is_empty() {
+                        "(no reason)"
+                    } else {
+                        &g.reason
+                    }
                 ));
             }
         }

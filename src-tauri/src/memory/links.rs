@@ -21,7 +21,10 @@ pub fn extract(body: &str) -> Vec<WikiRef> {
     WIKILINK
         .captures_iter(body)
         .map(|c| WikiRef {
-            target: c.get(1).map(|m| m.as_str().trim().to_string()).unwrap_or_default(),
+            target: c
+                .get(1)
+                .map(|m| m.as_str().trim().to_string())
+                .unwrap_or_default(),
             display: c.get(2).map(|m| m.as_str().trim().to_string()),
         })
         .collect()

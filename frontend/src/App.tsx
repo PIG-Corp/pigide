@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef } from "react";
 import { Allotment } from "allotment";
 import "allotment/dist/style.css";
 import "./styles/tokens.css";
@@ -6,19 +6,9 @@ import "./styles.css";
 import { WorkspaceSidebar } from "./components/WorkspaceSidebar";
 import { TilingArea } from "./components/TilingArea";
 import { OrchestratorPanel } from "./components/OrchestratorPanel";
-import { MemoryPanel } from "./components/MemoryPanel";
-import { SkillsPanel } from "./components/SkillsPanel";
-import { VoicePanel } from "./components/voice/VoicePanel";
 import { VoicePill } from "./components/voice/VoicePill";
-import { BrowserPanel } from "./components/BrowserPanel";
-import { FilesPanel } from "./components/FilesPanel";
-import { PromptsPanel } from "./components/PromptsPanel";
-import { AgentConfigPanel } from "./components/AgentConfigPanel";
-import { SshPresetsPanel } from "./components/SshPresetsPanel";
-import { ArchitectPanel } from "./components/ArchitectPanel";
 import { HotkeyBindings } from "./components/HotkeyBindings";
-import { TasksPanel } from "./components/TasksPanel";
-import { TransmissionLog } from "./components/TransmissionLog";
+import { SettingsButton } from "./components/SettingsButton";
 import { useStore } from "./state/store";
 import { useThemeBootstrap } from "./themes/useTheme";
 import {
@@ -36,6 +26,7 @@ import {
   onVoiceTranscript,
   onWorkspaceChanged,
 } from "./state/ipc";
+import { closeLeaf } from "./layout/tree";
 
 export default function App() {
   const setWorkspaces = useStore((s) => s.setWorkspaces);
@@ -43,7 +34,6 @@ export default function App() {
   const setLayout = useStore((s) => s.setLayout);
   const setAgents = useStore((s) => s.setAgents);
   const setChat = useStore((s) => s.setChat);
-  const removeAgent = useStore((s) => s.removeAgent);
   const upsertAgent = useStore((s) => s.upsertAgent);
   const setOrchestratorStatus = useStore((s) => s.setOrchestratorStatus);
   const upsertChat = useStore((s) => s.upsertChatMessage);
@@ -58,10 +48,35 @@ export default function App() {
 
   useThemeBootstrap();
 
+  // U-89 / H-30: cancellation ref so concurrent workspace switches don't
+  // corrupt state — each switch increments the id; stale continuations bail out.
+  const switchIdRef = useRef(0);
+
+  // Helper used by the workspace://changed handler when the orchestrator
+  // creates/switches a workspace under us. Note: chat is GLOBAL, not reloaded.
+  async function reloadAfterSwitch(newId: string) {
+    const switchId = ++switchIdRef.current;
+    try {
+      const list = await ipc.listWorkspaces();
+      if (switchIdRef.current !== switchId) return;
+      setWorkspaces(list);
+      setCurrent(newId);
+      const ws = await ipc.getWorkspace(newId);
+      if (switchIdRef.current !== switchId) return;
+      setLayout(ws.layout);
+      const agents = await ipc.listAgents(newId);
+      if (switchIdRef.current !== switchId) return;
+      setAgents(agents);
+    } catch (err) {
+      console.error("reloadAfterSwitch", err);
+    }
+  }
+
   // Initial load.
   useEffect(() => {
     (async () => {
       try {
+        await ipc.restoreSession().catch((err) => console.error("restore session", err));
         const list = await ipc.listWorkspaces();
         setWorkspaces(list);
         let cur = await ipc.getCurrentWorkspace();
@@ -93,22 +108,6 @@ export default function App() {
     })();
   }, [setAgents, setChat, setCurrent, setLayout, setQueue, setWorkspaces]);
 
-  // Helper used by the workspace://changed handler when the orchestrator
-  // creates/switches a workspace under us. Note: chat is GLOBAL, not reloaded.
-  async function reloadAfterSwitch(newId: string) {
-    try {
-      const list = await ipc.listWorkspaces();
-      setWorkspaces(list);
-      setCurrent(newId);
-      const ws = await ipc.getWorkspace(newId);
-      setLayout(ws.layout);
-      const agents = await ipc.listAgents(newId);
-      setAgents(agents);
-    } catch (err) {
-      console.error("reloadAfterSwitch", err);
-    }
-  }
-
   // Subscribe to backend events.
   useEffect(() => {
     let disposed = false;
@@ -120,7 +119,18 @@ export default function App() {
       });
     };
     track(onAgentExit((e) => {
-      removeAgent(e.agent_id);
+      const cur = useStore.getState();
+      const existing = cur.agents[e.agent_id];
+      if (existing) {
+        upsertAgent({ ...existing, status: "exited" });
+      }
+      // U-46 / H-31: remove dead agent's tile from the layout tree.
+      const currentLayout = useStore.getState().layout;
+      const currentWsId = useStore.getState().currentId;
+      const nextLayout = closeLeaf(currentLayout, e.agent_id);
+      setLayout(nextLayout);
+      if (currentWsId) ipc.updateLayout(currentWsId, nextLayout).catch(() => undefined);
+      ipc.listWorkspaces().then(setWorkspaces).catch(() => undefined);
     }));
     track(onAgentSpawned((a) => {
       // Only adopt if it belongs to OUR current workspace.
@@ -189,7 +199,7 @@ export default function App() {
               break;
             }
             const at = e.route.agent_type as
-              | "kiro-cli" | "claude" | "aider" | "goose" | "opencode" | "devin";
+              | "kiro-cli" | "claude" | "opencode" | "devin" | "agy";
             await ipc.spawnAgent(ws, at, { cwd: e.route.cwd ?? undefined });
             break;
           }
@@ -223,24 +233,27 @@ export default function App() {
   return (
     <div className="app-shell">
       <HotkeyBindings />
-      <Allotment defaultSizes={[220, 800, 360]}>
+      <Allotment defaultSizes={[220, 600, 320]}>
         <Allotment.Pane minSize={160} preferredSize={220}>
           <WorkspaceSidebar />
         </Allotment.Pane>
-        <Allotment.Pane minSize={400}>
+        <Allotment.Pane minSize={300}>
           <TilingArea />
         </Allotment.Pane>
-        <Allotment.Pane minSize={260} preferredSize={360}>
-          <RightPane />
+        <Allotment.Pane minSize={260} preferredSize={320}>
+          <OrchestratorPanel />
         </Allotment.Pane>
       </Allotment>
 
-      <div className="toast-wrap">
+      <SettingsButton />
+
+      <div className="toast-wrap" role="status" aria-live="polite">
         {toasts.map((t) => (
           <div
             key={t.id}
             className={`toast ${t.kind}`}
             onClick={() => dismissToast(t.id)}
+            role="alert"
           >
             {t.text}
           </div>
@@ -248,110 +261,6 @@ export default function App() {
       </div>
 
       <VoicePill />
-    </div>
-  );
-}
-
-type RightTab =
-  | "chat"
-  | "architect"
-  | "memory"
-  | "skills"
-  | "voice"
-  | "browser"
-  | "files"
-  | "prompts"
-  | "agents"
-  | "ssh";
-
-function RightPane() {
-  const [tab, setTab] = useState<RightTab>("chat");
-  return (
-    <div className="right-pane-bridge">
-      <div className="right-pane-bridge__bottom">
-        <TasksPanel />
-        <div className="right-pane" style={{ borderLeft: "none" }}>
-          <div className="right-pane-tabs">
-            <button
-              className={`right-pane-tab ${tab === "chat" ? "active" : ""}`}
-              onClick={() => setTab("chat")}
-            >
-              Chat
-            </button>
-            <button
-              className={`right-pane-tab ${tab === "architect" ? "active" : ""}`}
-              onClick={() => setTab("architect")}
-              title="Always-On Architect"
-            >
-              Architect
-            </button>
-            <button
-              className={`right-pane-tab ${tab === "memory" ? "active" : ""}`}
-              onClick={() => setTab("memory")}
-            >
-              Memory
-            </button>
-            <button
-              className={`right-pane-tab ${tab === "skills" ? "active" : ""}`}
-              onClick={() => setTab("skills")}
-              title="Architect prompt-skills"
-            >
-              Skills
-            </button>
-            <button
-              className={`right-pane-tab ${tab === "voice" ? "active" : ""}`}
-              onClick={() => setTab("voice")}
-            >
-              Voice
-            </button>
-            <button
-              className={`right-pane-tab ${tab === "browser" ? "active" : ""}`}
-              onClick={() => setTab("browser")}
-            >
-              Web
-            </button>
-            <button
-              className={`right-pane-tab ${tab === "files" ? "active" : ""}`}
-              onClick={() => setTab("files")}
-            >
-              Files
-            </button>
-            <button
-              className={`right-pane-tab ${tab === "prompts" ? "active" : ""}`}
-              onClick={() => setTab("prompts")}
-            >
-              Prompts
-            </button>
-            <button
-              className={`right-pane-tab ${tab === "agents" ? "active" : ""}`}
-              onClick={() => setTab("agents")}
-              title="Per-role system prompt overrides"
-            >
-              Agents
-            </button>
-            <button
-              className={`right-pane-tab ${tab === "ssh" ? "active" : ""}`}
-              onClick={() => setTab("ssh")}
-              title="SSH connection presets"
-            >
-              SSH
-            </button>
-          </div>
-          <div className="right-pane-body">
-            {tab === "chat" ? <OrchestratorPanel /> : null}
-            {tab === "architect" ? <ArchitectPanel /> : null}
-            {tab === "memory" ? <MemoryPanel /> : null}
-            {tab === "skills" ? <SkillsPanel /> : null}
-            {tab === "voice" ? <VoicePanel /> : null}
-            {tab === "browser" ? <BrowserPanel /> : null}
-            {tab === "files" ? <FilesPanel /> : null}
-            {tab === "prompts" ? <PromptsPanel /> : null}
-            {tab === "agents" ? <AgentConfigPanel /> : null}
-            {tab === "ssh" ? <SshPresetsPanel /> : null}
-          </div>
-        </div>
-      </div>
-      <TransmissionLog />
     </div>
   );
 }

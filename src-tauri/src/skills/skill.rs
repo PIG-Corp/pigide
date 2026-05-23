@@ -155,9 +155,7 @@ fn parse_frontmatter(fm: &str) -> Result<SkillFrontmatter> {
         match key {
             "id" => out.id = val.trim_matches(&['"', '\''][..]).to_string(),
             "name" => out.name = val.trim_matches(&['"', '\''][..]).to_string(),
-            "description" => {
-                out.description = val.trim_matches(&['"', '\''][..]).to_string()
-            }
+            "description" => out.description = val.trim_matches(&['"', '\''][..]).to_string(),
             "version" => {
                 if let Ok(n) = val.parse() {
                     out.version = n;
@@ -170,9 +168,7 @@ fn parse_frontmatter(fm: &str) -> Result<SkillFrontmatter> {
             }
             "tags" => out.tags = parse_inline_list(val),
             "triggers" => out.triggers = parse_inline_list(val),
-            "model_hint" => {
-                out.model_hint = Some(val.trim_matches(&['"', '\''][..]).to_string())
-            }
+            "model_hint" => out.model_hint = Some(val.trim_matches(&['"', '\''][..]).to_string()),
             "enabled" => out.enabled = !matches!(val, "false" | "no" | "0"),
             _ => {}
         }

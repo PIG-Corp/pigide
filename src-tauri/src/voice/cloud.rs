@@ -52,8 +52,8 @@ impl CloudConfig {
         let endpoint = db::get_setting(db, SETTING_ENDPOINT)?
             .filter(|s| !s.trim().is_empty())
             .unwrap_or_else(|| DEFAULT_ENDPOINT.to_string());
-        let language = db::get_setting(db, SETTING_LANGUAGE)?
-            .filter(|s| !s.trim().is_empty() && s != "auto");
+        let language =
+            db::get_setting(db, SETTING_LANGUAGE)?.filter(|s| !s.trim().is_empty() && s != "auto");
         Ok(Some(Self {
             api_key: key,
             endpoint,
@@ -63,10 +63,7 @@ impl CloudConfig {
 
     /// Whether a key is present (no network probe — purely a settings check).
     pub fn is_configured(db: &DbPool) -> bool {
-        Self::load(db)
-            .ok()
-            .flatten()
-            .is_some()
+        Self::load(db).ok().flatten().is_some()
     }
 
     /// Persist the API key (creating or overwriting). Empty string clears.
@@ -89,9 +86,7 @@ mod tests {
         let pool = r2d2::Pool::builder().max_size(2).build(manager).unwrap();
         pool.get()
             .unwrap()
-            .execute_batch(
-                "CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);",
-            )
+            .execute_batch("CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);")
             .unwrap();
         pool
     }

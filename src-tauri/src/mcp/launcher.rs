@@ -60,21 +60,21 @@ fn tile_mcp_token(db: &DbPool) -> Result<String> {
     Ok(created.plaintext)
 }
 
-/// JSON-RPC URL of the running MCP server, including bearer-as-query so the
-/// transport layer doesn't have to thread auth headers separately.
-fn mcp_url(addr: std::net::SocketAddr, token: &str) -> String {
+/// JSON-RPC URL of the running MCP server. Authentication is supplied through
+/// the `Authorization` header in `server_block`.
+fn mcp_url(addr: std::net::SocketAddr) -> String {
     let host = match addr {
         std::net::SocketAddr::V4(v4) if v4.ip().is_unspecified() => "127.0.0.1".to_string(),
         std::net::SocketAddr::V6(v6) if v6.ip().is_unspecified() => "127.0.0.1".to_string(),
         other => other.ip().to_string(),
     };
-    format!("http://{}:{}/mcp?apiKey={}", host, addr.port(), token)
+    format!("http://{}:{}/mcp", host, addr.port())
 }
 
 fn server_block(addr: std::net::SocketAddr, token: &str) -> Value {
     json!({
         "type": "http",
-        "url": mcp_url(addr, token),
+        "url": mcp_url(addr),
         "headers": {
             "Authorization": format!("Bearer {}", token)
         }
@@ -84,10 +84,7 @@ fn server_block(addr: std::net::SocketAddr, token: &str) -> Value {
 /// Returns the value to pass as `--mcp-config <json>` when spawning a
 /// Claude tile. `Ok(None)` means the MCP server isn't running yet — caller
 /// should skip the flag rather than fail the spawn.
-pub fn build_mcp_config_arg(
-    db: &DbPool,
-    handle: &Arc<McpServerHandle>,
-) -> Result<Option<String>> {
+pub fn build_mcp_config_arg(db: &DbPool, handle: &Arc<McpServerHandle>) -> Result<Option<String>> {
     let Some(addr) = handle.current_addr() else {
         return Ok(None);
     };
@@ -138,9 +135,7 @@ pub fn merge_project_mcp_json(
         )));
     }
     let obj = root.as_object_mut().expect("checked above");
-    let servers = obj
-        .entry("mcpServers")
-        .or_insert_with(|| json!({}));
+    let servers = obj.entry("mcpServers").or_insert_with(|| json!({}));
     if !servers.is_object() {
         return Err(Error::Other(format!(
             "{}: mcpServers must be an object",
@@ -169,12 +164,20 @@ mod tests {
     #[test]
     fn url_collapses_unspecified_to_loopback() {
         let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 20129);
-        assert_eq!(mcp_url(addr, "tok"), "http://127.0.0.1:20129/mcp?apiKey=tok");
+        assert_eq!(mcp_url(addr), "http://127.0.0.1:20129/mcp");
     }
 
     #[test]
     fn url_uses_explicit_loopback_as_is() {
         let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 20129);
-        assert_eq!(mcp_url(addr, "tok"), "http://127.0.0.1:20129/mcp?apiKey=tok");
+        assert_eq!(mcp_url(addr), "http://127.0.0.1:20129/mcp");
+    }
+
+    #[test]
+    fn server_block_keeps_token_out_of_url() {
+        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 20129);
+        let block = server_block(addr, "tok");
+        assert_eq!(block["url"], "http://127.0.0.1:20129/mcp");
+        assert_eq!(block["headers"]["Authorization"], "Bearer tok");
     }
 }

@@ -42,9 +42,10 @@ pub fn init_pool() -> Result<DbPool> {
 
 /// Idempotent schema migration on a single connection.
 fn migrate_one(conn: &rusqlite::Connection) -> Result<()> {
-    let current: i64 =
-        conn.query_row("PRAGMA user_version;", [], |r| r.get(0)).unwrap_or(0);
-    let target = 13;
+    let current: i64 = conn
+        .query_row("PRAGMA user_version;", [], |r| r.get(0))
+        .unwrap_or(0);
+    let target = 14;
     if current >= target {
         return Ok(());
     }
@@ -447,6 +448,42 @@ fn migrate_one(conn: &rusqlite::Connection) -> Result<()> {
         conn.execute_batch(
             "BEGIN;
              ALTER TABLE chat_queue ADD COLUMN attachments_json TEXT;
+             COMMIT;",
+        )?;
+    }
+    if current < 14 {
+        // Fix FTS5 column name mismatch: FTS columns must match content table
+        // column names for snippet()/highlight() to work. Previously FTS had
+        // `tags, aliases` but content table has `tags_json, aliases_json`.
+        conn.execute_batch(
+            "BEGIN;
+             DROP TRIGGER IF EXISTS memory_notes_ai;
+             DROP TRIGGER IF EXISTS memory_notes_ad;
+             DROP TRIGGER IF EXISTS memory_notes_au;
+             DROP TABLE IF EXISTS memory_fts;
+
+             CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5(
+                title, body, tags_json, aliases_json,
+                content='memory_notes', content_rowid='rowid',
+                tokenize='unicode61 remove_diacritics 2'
+             );
+
+             CREATE TRIGGER IF NOT EXISTS memory_notes_ai AFTER INSERT ON memory_notes BEGIN
+               INSERT INTO memory_fts(rowid, title, body, tags_json, aliases_json)
+               VALUES (new.rowid, new.title, new.body, new.tags_json, new.aliases_json);
+             END;
+             CREATE TRIGGER IF NOT EXISTS memory_notes_ad AFTER DELETE ON memory_notes BEGIN
+               INSERT INTO memory_fts(memory_fts, rowid, title, body, tags_json, aliases_json)
+               VALUES('delete', old.rowid, old.title, old.body, old.tags_json, old.aliases_json);
+             END;
+             CREATE TRIGGER IF NOT EXISTS memory_notes_au AFTER UPDATE ON memory_notes BEGIN
+               INSERT INTO memory_fts(memory_fts, rowid, title, body, tags_json, aliases_json)
+               VALUES('delete', old.rowid, old.title, old.body, old.tags_json, old.aliases_json);
+               INSERT INTO memory_fts(rowid, title, body, tags_json, aliases_json)
+               VALUES (new.rowid, new.title, new.body, new.tags_json, new.aliases_json);
+             END;
+
+             INSERT INTO memory_fts(memory_fts) VALUES('rebuild');
              COMMIT;",
         )?;
     }

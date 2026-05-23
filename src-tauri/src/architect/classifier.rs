@@ -5,8 +5,10 @@
 //! чтобы цветные выводы CLI-агентов не ломали детекцию.
 
 use once_cell::sync::Lazy;
-use regex::{Regex, RegexSet};
+use regex::RegexSet;
 use std::time::Duration;
+
+use crate::sanitize::strip_ansi;
 
 /// Чёткое классифицированное состояние агента.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -110,15 +112,6 @@ static DONE_RE: Lazy<RegexSet> = Lazy::new(|| RegexSet::new(DONE_PATTERNS).unwra
 static ASK_RE: Lazy<RegexSet> = Lazy::new(|| RegexSet::new(ASK_PATTERNS).unwrap());
 static ERROR_RE: Lazy<RegexSet> = Lazy::new(|| RegexSet::new(ERROR_PATTERNS).unwrap());
 
-/// CSI / OSC / прочие ANSI-escape (упрощённая версия — достаточная для tail).
-static ANSI_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"\x1B(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*\x07|[@-Z\\-_])").unwrap());
-
-/// Очистить буфер от ANSI escape, чтобы regex не ловил мусор.
-pub fn strip_ansi(s: &str) -> String {
-    ANSI_RE.replace_all(s, "").into_owned()
-}
-
 /// Решить, что происходит с агентом.
 ///
 /// `tail` — UTF-8 хвост лога (например, последние 4-8 KB). Не паникует на
@@ -135,7 +128,9 @@ pub fn classify(
     // Берём последние ~2 KB — больше нам нечего classify-ить, маркеры обычно
     // в самом конце вывода.
     let window: &str = if cleaned.len() > 2048 {
-        &cleaned[cleaned.len() - 2048..]
+        let start = cleaned.len() - 2048;
+        let start = cleaned.ceil_char_boundary(start);
+        &cleaned[start..]
     } else {
         &cleaned
     };
@@ -144,9 +139,7 @@ pub fn classify(
 
     // Свежий вывод = ещё работает. Кроме случая, когда в самом хвосте вопрос —
     // агент мог только что напечатать prompt и ждёт ответа.
-    let is_quiet = idle_for
-        .map(|d| d >= idle_done_after)
-        .unwrap_or(false);
+    let is_quiet = idle_for.map(|d| d >= idle_done_after).unwrap_or(false);
 
     let asks = ASK_RE.is_match(window);
     let errors = ERROR_RE.is_match(window);
