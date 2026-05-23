@@ -17,3 +17,22 @@ Anthropic Claude Code CLI. Default args: none (interactive mode). Needs `ANTHROP
 
 ## opencode
 Terminal-native open-source agent (alias `oc`). Default args: none. Reads `OPENAI_API_KEY` / provider env vars and `~/.opencode/config.json` for model selection.
+
+## codex
+OpenAI Codex CLI (aliases: `openai-codex`). Official OpenAI coding agent — runs in interactive TUI mode inside the PigIDE PTY tile.
+
+Install:
+
+```bash
+npm i -g @openai/codex
+# or
+brew install codex
+```
+
+Configure:
+
+- `OPENAI_API_KEY` — required; inherited from PigIDE's environment, so export it before launching the app (`export OPENAI_API_KEY=sk-...`).
+- `bin.codex` setting **or** `PIGIDE_CODEX_BIN` env var — override the binary path. Otherwise PigIDE searches `~/.local/bin/codex`, `~/.npm-global/bin/codex`, `~/.bun/bin/codex`, `/usr/local/bin/codex`, `/opt/homebrew/bin/codex`, `/usr/bin/codex`, then `$PATH`.
+- `args.codex` setting — override default argv (default is empty, which launches the interactive TUI).
+
+Spawn from the orchestrator: `spawn_agent { agent_type: "codex" }`.
