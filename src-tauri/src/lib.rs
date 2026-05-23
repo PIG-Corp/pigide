@@ -405,6 +405,7 @@ pub fn run() {
             commands::delete_chat_session,
             commands::get_current_session,
             commands::set_current_session,
+            commands::set_chat_scope,
             commands::set_setting,
             commands::get_setting,
             commands::start_voice,

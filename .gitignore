@@ -41,3 +41,6 @@ pigide-buildup.json
 # Local runtime data
 .pigmemory/
 
+# Playwright artifacts
+test-results/
+playwright-report/

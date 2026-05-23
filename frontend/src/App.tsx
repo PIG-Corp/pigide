@@ -25,6 +25,7 @@ import {
   onVoiceState,
   onVoiceTranscript,
   onWorkspaceChanged,
+  onChatScopeChanged,
 } from "./state/ipc";
 import { closeLeaf } from "./layout/tree";
 
@@ -42,6 +43,7 @@ export default function App() {
   const setVoiceDownload = useStore((s) => s.setVoiceDownload);
   const appendDraftInput = useStore((s) => s.appendDraftInput);
   const setQueue = useStore((s) => s.setQueue);
+  const setChatScope = useStore((s) => s.setChatScope);
   const pushToast = useStore((s) => s.pushToast);
   const toasts = useStore((s) => s.toasts);
   const dismissToast = useStore((s) => s.dismissToast);
@@ -91,7 +93,13 @@ export default function App() {
           const agents = await ipc.listAgents(cur);
           setAgents(agents);
         }
-        // Orchestrator chat is global — load it independently of workspace.
+        // Orchestrator chat is scope-resolved — load initial session scope first.
+        try {
+          const sess = await ipc.getCurrentSession();
+          setChatScope(sess.scope);
+        } catch (err) {
+          console.error("init session", err);
+        }
         const chat = await ipc.listChat();
         setChat(chat);
         // Initial queue snapshot — backend will keep us in sync via events.
@@ -106,7 +114,7 @@ export default function App() {
         console.error("init", err);
       }
     })();
-  }, [setAgents, setChat, setCurrent, setLayout, setQueue, setWorkspaces]);
+  }, [setAgents, setChat, setCurrent, setLayout, setQueue, setWorkspaces, setChatScope]);
 
   // Subscribe to backend events.
   useEffect(() => {
@@ -171,6 +179,18 @@ export default function App() {
     }));
     track(onChatStatus((e) => {
       setOrchestratorStatus(e.state);
+    }));
+    track(onChatScopeChanged(async (e) => {
+      setChatScope(e.scope);
+      try {
+        const chat = await ipc.listChat();
+        setChat(chat);
+        const items = await ipc.listChatQueue();
+        const pending = items.filter((i) => i.status === "queued").length;
+        setQueue(items, pending);
+      } catch (err) {
+        console.error("reload chat on scope change", err);
+      }
     }));
     track(onChatQueue((e) => {
       setQueue(e.items, e.pending);

@@ -917,6 +917,26 @@ pre, code {
   flex-direction: column;
   gap: var(--space-6);
 }
+.chat-empty {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-6);
+  color: var(--fg-muted);
+  text-align: center;
+  margin: auto 0;
+}
+.chat-empty-title {
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--fg);
+  letter-spacing: 0.02em;
+}
+.chat-empty-desc {
+  font-size: var(--text-xs);
+  line-height: var(--text-sm-lh);
+  color: var(--fg-subtle);
+}
 .chat-msg { display: flex; flex-direction: column; gap: var(--space-2); max-width: 100%; }
 .chat-msg .role {
   font-size: var(--text-xs);
@@ -3231,6 +3251,36 @@ pre, code {
   display: flex;
   align-items: center;
   justify-content: center;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+  -webkit-appearance: none;
+  appearance: none;
+  border-radius: var(--radius-circle);
+  outline: none;
+  transition: transform 120ms ease;
+}
+.bridge-orb:hover .bridge-orb__core {
+  box-shadow:
+    0 0 28px rgba(220, 150, 50, 0.55),
+    inset 0 0 15px rgba(0, 0, 0, 0.6);
+}
+.bridge-orb:active {
+  transform: scale(0.97);
+}
+.bridge-orb:focus-visible {
+  box-shadow: 0 0 0 2px var(--accent);
+}
+.bridge-orb--recording .bridge-orb__core,
+.bridge-orb--transcribing .bridge-orb__core {
+  animation: bridge-pulse 1s ease-in-out infinite;
+}
+.bridge-orb--recording .bridge-orb__aura,
+.bridge-orb--transcribing .bridge-orb__aura {
+  opacity: 1;
 }
 
 .bridge-orb__aura {
@@ -3271,7 +3321,9 @@ pre, code {
 }
 
 .bridge-orb__mark {
-  color: rgba(220, 150, 50, 0.85);
+  width: 56px;
+  height: 56px;
+  object-fit: contain;
   filter: drop-shadow(0 0 4px rgba(220, 150, 50, 0.4));
 }
 
@@ -3607,3 +3659,717 @@ pre, code {
 .settings-panel-overlay__body > * {
   height: 100%;
 }
+
+/* ──────────────────────────────────────────────────────── */
+/* ─── Redesigned Bridge Pane ───────────────────────────── */
+/* ──────────────────────────────────────────────────────── */
+
+.accent-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-circle);
+  background: var(--accent);
+  flex-shrink: 0;
+}
+
+.orb-speaking-left {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.orb-speaking-sep {
+  color: var(--fg-subtle);
+  margin: 0 var(--space-2);
+}
+
+.orb-speaking-right {
+  color: var(--fg-muted);
+}
+
+/* ─── Tasks Card ─── */
+.tasks-card {
+  display: flex;
+  flex-direction: column;
+  margin: 0 var(--space-6) var(--space-6);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-raised);
+  box-shadow: var(--shadow-1);
+  overflow: hidden;
+}
+
+.tasks-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 32px;
+  padding: var(--space-3) var(--space-5);
+  border-bottom: 1px solid var(--border);
+  background: var(--hover);
+}
+
+.tasks-card-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.tasks-card-icon { color: var(--accent); }
+
+.tasks-card-title {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--fg);
+  letter-spacing: -0.005em;
+}
+
+.tasks-card-expand {
+  color: var(--fg-muted);
+  transition: color var(--dur-fast), transform var(--dur-fast);
+}
+
+.tasks-card-expand:hover { color: var(--fg); }
+
+.tasks-card-expand.active {
+  color: var(--accent);
+  transform: rotate(180deg);
+}
+
+.tasks-card-body { padding: var(--space-5) var(--space-6); }
+
+.tasks-empty-title {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--fg);
+  margin-bottom: var(--space-2);
+}
+
+.tasks-empty-desc {
+  font-size: var(--text-xs);
+  line-height: var(--text-xs-lh);
+  color: var(--fg-muted);
+}
+
+.tasks-mini-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.tasks-mini-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+/* Status dot tone vocabulary mirrors `Task["status"]` (state/types.ts).
+ * Statuses without an explicit class fall back to the base muted tone. */
+.tasks-mini-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-circle);
+  background: var(--fg-subtle);
+  flex-shrink: 0;
+}
+.tasks-mini-status-dot.complete    { background: var(--success); }
+.tasks-mini-status-dot.in_progress { background: var(--accent); }
+.tasks-mini-status-dot.in_review   { background: var(--info); }
+.tasks-mini-status-dot.todo        { background: var(--fg-muted); }
+
+.tasks-mini-text {
+  font-size: var(--text-xs);
+  color: var(--fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tasks-mini-more {
+  margin-top: var(--space-1);
+  font-size: 10px;
+  font-style: italic;
+  color: var(--fg-subtle);
+}
+
+/* ─── Transmission Log Divider ─── */
+.transmission-log-divider {
+  display: flex;
+  align-items: center;
+  margin: var(--space-4) 0;
+  padding: 0 var(--space-6);
+  text-align: center;
+}
+
+.transmission-log-divider::before,
+.transmission-log-divider::after {
+  content: '';
+  flex: 1;
+  border-bottom: 1px solid var(--border);
+}
+
+.transmission-log-divider::before { margin-right: var(--space-4); }
+.transmission-log-divider::after  { margin-left: var(--space-4); }
+
+.transmission-log-text {
+  font-family: var(--font-sans);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--fg-subtle);
+}
+
+/* ─── Chat Scope Selector ─── */
+.chat-scope-selector {
+  display: flex;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  padding: 2px;
+  gap: 2px;
+  margin: var(--space-4) var(--space-6) 0 var(--space-6);
+  box-shadow: var(--shadow-1);
+}
+
+.chat-scope-btn {
+  flex: 1;
+  border: none;
+  background: transparent;
+  border-radius: var(--radius-pill);
+  padding: var(--space-2) var(--space-4);
+  font-family: var(--font-sans);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--fg-muted);
+  cursor: pointer;
+  transition: all var(--dur-fast) var(--ease-out);
+}
+
+.chat-scope-btn:hover:not(:disabled) {
+  color: var(--fg);
+  background: var(--hover);
+}
+
+.chat-scope-btn.active {
+  background: var(--bg-raised);
+  color: var(--accent);
+  box-shadow: var(--shadow-1);
+}
+
+.chat-scope-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+/* ─── Redesigned Chat Logs ─── */
+.chat-log-row {
+  display: flex;
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-6);
+  transition: background var(--dur-fast) var(--ease-out);
+}
+
+.chat-log-row:hover { background: var(--hover); }
+
+.chat-log-num {
+  flex-shrink: 0;
+  width: 24px;
+  margin-top: 2px;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--fg-subtle);
+  text-align: right;
+  user-select: none;
+}
+
+/* Vertical accent strip alongside each row, tinted by sender. */
+.chat-log-line {
+  flex-shrink: 0;
+  width: 2px;
+  margin: 2px 0;
+  background: var(--border-strong);
+}
+.chat-log-line.assistant       { background: var(--accent); }
+.chat-log-line.user            { background: var(--fg-subtle); }
+.chat-log-line.user.processing { background: var(--info); }
+.chat-log-line.user.queued     { background: var(--fg-subtle); }
+.chat-log-line.tool {
+  width: 0;
+  background: transparent;
+  border-left: 2px dashed var(--fg-subtle);
+}
+
+.chat-log-content {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.chat-log-sender {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: var(--text-xs);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.chat-log-sender.assistant { color: var(--accent); }
+.chat-log-sender.user      { color: var(--fg); }
+.chat-log-sender.tool      { color: var(--info); }
+
+.chat-log-body {
+  font-size: var(--text-base);
+  line-height: var(--text-base-lh);
+  color: var(--fg);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.chat-log-body.tool {
+  margin: 0;
+  padding: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-raised);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  overflow-x: auto;
+}
+
+.chat-log-tool-details {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-raised);
+  overflow: hidden;
+}
+
+.chat-log-tool-summary {
+  padding: var(--space-2) var(--space-4);
+  background: var(--hover);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--fg-muted);
+  cursor: pointer;
+  user-select: none;
+}
+
+.chat-log-tool-body {
+  margin: 0;
+  padding: var(--space-4);
+  border-top: 1px solid var(--border);
+  background: var(--bg-panel);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--fg-muted);
+  overflow-x: auto;
+}
+
+.chat-log-tool-summary-line {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--hover);
+  font-size: var(--text-xs);
+  color: var(--fg-muted);
+  font-style: italic;
+}
+
+.chat-log-tool-summary-text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 28ch;
+}
+
+.btn--icon.active {
+  background: var(--hover);
+  color: var(--fg);
+}
+
+.chat-log-cancel-btn {
+  opacity: 0.6;
+  transition: opacity var(--dur-fast);
+}
+.chat-log-cancel-btn:hover { opacity: 1; }
+
+/* ─── Chat Input ─── */
+.chat-input-wrapper {
+  display: flex;
+  align-items: flex-end;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  background: var(--bg-raised);
+  transition:
+    border-color var(--dur-fast) var(--ease-out),
+    outline-color var(--dur-fast) var(--ease-out);
+}
+
+.chat-input-wrapper:focus-within {
+  border-color: var(--accent);
+  outline: var(--ring-width) solid var(--ring);
+  outline-offset: var(--ring-offset);
+}
+
+.chat-input-wrapper .mention-wrap {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Higher specificity beats the generic `.chat-input textarea` rule above
+ * (line ~970) without resorting to !important.
+ * NB: no `flex: 1` — that would force flex-basis:0 + flex-grow:1 inside
+ * the column-direction .mention-wrap, which silently overrides the inline
+ * `height` set by JS auto-resize. The textarea sizes itself via JS-set
+ * height, clamped by min/max-height. */
+.chat-input-wrapper .chat-input-textarea {
+  display: block;
+  width: 100%;
+  min-height: 24px;
+  max-height: 200px;
+  margin: 0;
+  padding: var(--space-1) 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  resize: none;
+  overflow-y: auto;
+  color: var(--fg);
+  font-size: var(--text-base);
+  line-height: var(--text-base-lh);
+}
+
+.chat-input-actions {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: var(--space-2);
+  margin-left: var(--space-3);
+}
+
+/* Action / send / stop share the same circular shape; differ only in tone. */
+.chat-input-action-btn,
+.chat-input-send-btn,
+.chat-input-stop-btn {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: var(--radius-circle);
+  cursor: pointer;
+}
+
+.chat-input-action-btn,
+.chat-input-send-btn,
+.chat-input-stop-btn {
+  transition:
+    background var(--dur-fast),
+    color var(--dur-fast),
+    opacity var(--dur-fast),
+    transform var(--dur-fast),
+    filter var(--dur-fast);
+}
+
+.chat-input-action-btn:focus-visible,
+.chat-input-send-btn:focus-visible,
+.chat-input-stop-btn:focus-visible {
+  outline: var(--ring-width) solid var(--ring);
+  outline-offset: var(--ring-offset);
+}
+
+.chat-input-action-btn {
+  background: transparent;
+  color: var(--fg-muted);
+}
+.chat-input-action-btn:hover {
+  background: var(--hover);
+  color: var(--fg);
+}
+.chat-input-action-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.chat-input-action-btn.voice.recording {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+.chat-input-action-btn.voice.transcribing {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.chat-input-send-btn {
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+.chat-input-send-btn:hover    { filter: brightness(1.1); }
+.chat-input-send-btn:active   { transform: scale(0.95); }
+.chat-input-send-btn:disabled {
+  background: var(--hover);
+  color: var(--fg-subtle);
+  cursor: not-allowed;
+  filter: none;
+}
+
+.chat-input-stop-btn {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+.chat-input-stop-btn:hover {
+  background: var(--danger);
+  color: var(--bg);
+}
+
+@keyframes pulse-rec {
+  0%, 100% { transform: scale(1);    opacity: 1; }
+  50%      { transform: scale(1.15); opacity: 0.7; }
+}
+
+.pulse-voice { animation: pulse-rec 1.2s ease-in-out infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  .pulse-voice               { animation: none; }
+  .chat-log-row              { transition: none; }
+  .chat-input-wrapper        { transition: none; }
+  .chat-input-action-btn,
+  .chat-input-send-btn,
+  .chat-input-stop-btn       { transition: none; }
+  .chat-input-send-btn:active { transform: none; }
+  .tasks-card-expand         { transition: none; }
+}
+
+/* ─── Voice model download bar ─── */
+.voice-download-bar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 20px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-raised);
+  overflow: hidden;
+}
+
+.voice-download-progress {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: var(--accent-soft);
+  transition: width var(--dur-slower) var(--ease-out);
+}
+
+.voice-download-text {
+  position: relative;
+  z-index: 1;
+  font-family: var(--font-sans);
+  font-size: 10px;
+  color: var(--fg-muted);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .voice-download-progress { transition: none; }
+}
+
+/* ─── Markdown Rendering & Chat Log Improvements ─── */
+@keyframes chat-row-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.chat-log-row {
+  animation: chat-row-enter var(--dur-slow) var(--ease-out) both;
+}
+
+/* System Message Styling */
+.chat-log-line.system {
+  background: var(--danger);
+  border-left: 2px solid var(--danger);
+}
+.chat-log-sender.system {
+  color: var(--danger);
+}
+.chat-log-body.system {
+  color: var(--danger);
+  background: var(--danger-soft);
+  padding: var(--space-4);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--danger-soft);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  white-space: pre-wrap;
+}
+
+/* Markdown typography inside chat */
+.markdown-body {
+  font-size: var(--text-base);
+  line-height: var(--text-base-lh);
+  color: var(--fg);
+  word-break: break-word;
+}
+.markdown-body p {
+  margin: 0 0 var(--space-3) 0;
+}
+.markdown-body p:last-child {
+  margin-bottom: 0;
+}
+.markdown-body h1, .markdown-body h2, .markdown-body h3, .markdown-body h4 {
+  margin-top: var(--space-4);
+  margin-bottom: var(--space-2);
+  font-weight: 600;
+  line-height: 1.25;
+  color: var(--fg);
+}
+.markdown-body h1 { font-size: 1.3em; }
+.markdown-body h2 { font-size: 1.15em; }
+.markdown-body h3 { font-size: 1.05em; }
+.markdown-body h4 { font-size: 1em; }
+
+.markdown-body ul, .markdown-body ol {
+  margin-top: 0;
+  margin-bottom: var(--space-3);
+  padding-left: var(--space-6);
+}
+.markdown-body li {
+  margin-bottom: var(--space-1);
+}
+.markdown-body pre {
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+  margin: var(--space-3) 0;
+  overflow-x: auto;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  max-width: 100%;
+}
+.markdown-body code {
+  background: var(--bg-raised);
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--accent);
+}
+.markdown-body pre code {
+  background: transparent;
+  padding: 0;
+  border-radius: 0;
+  font-size: inherit;
+  color: inherit;
+}
+.markdown-body blockquote {
+  margin: var(--space-3) 0;
+  padding: var(--space-1) 0 var(--space-1) var(--space-4);
+  color: var(--fg-muted);
+  border-left: 3px solid var(--border-strong);
+}
+.markdown-body a {
+  color: var(--info);
+  text-decoration: none;
+}
+.markdown-body a:hover {
+  text-decoration: underline;
+}
+.markdown-body table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: var(--space-3) 0;
+  font-size: var(--text-xs);
+}
+.markdown-body th, .markdown-body td {
+  border: 1px solid var(--border);
+  padding: var(--space-2) var(--space-3);
+  text-align: left;
+}
+.markdown-body th {
+  background: var(--bg-raised);
+  font-weight: 600;
+  color: var(--fg);
+}
+
+/* Tool calls dynamic layout */
+.chat-log-tool-arrow {
+  margin-right: var(--space-2);
+  display: inline-block;
+  width: 10px;
+}
+.chat-log-tool-name {
+  font-weight: 600;
+}
+.chat-log-tool-status.running {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--info);
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: 9px;
+  letter-spacing: 0.04em;
+}
+@keyframes spin-dot {
+  0%, 100% { opacity: 0.3; transform: scale(0.8); }
+  50% { opacity: 1; transform: scale(1.2); }
+}
+.spinner-dot {
+  width: 6px;
+  height: 6px;
+  background-color: var(--info);
+  border-radius: var(--radius-circle);
+  display: inline-block;
+  animation: spin-dot 1s ease-in-out infinite;
+}
+
+/* Tool output show more / less button */
+.tool-expand-btn {
+  margin-top: var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--info);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+.tool-expand-btn:hover {
+  text-decoration: underline;
+}
+
+/* Dynamic Bridge Orb status colors */
+.orb-status-active {
+  font-weight: 600;
+}
+.orb-status-active.recording {
+  color: var(--danger);
+}
+.orb-status-active.transcribing {
+  color: var(--accent);
+}
+.orb-status-active.thinking {
+  color: var(--info);
+}
+.orb-status-active.tool {
+  color: var(--success);
+}
+.orb-status-idle {
+  color: var(--fg-subtle);
+  font-weight: 500;
+}
+

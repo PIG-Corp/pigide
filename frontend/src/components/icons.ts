@@ -19,4 +19,9 @@ export {
   RotateCw,
   Clock,
   Loader,
+  Volume2,
+  RotateCcw,
+  Paperclip,
+  ListTodo,
+  Wrench,
 } from "lucide-react";

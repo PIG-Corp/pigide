@@ -27,6 +27,7 @@ interface AppStateShape {
 
   // chat
   chat: ChatMessage[];
+  chatScope: "global" | "workspace";
   orchestratorStatus: OrchestratorStatus;
   draftInput: string;
   queueItems: QueueItem[];
@@ -40,6 +41,13 @@ interface AppStateShape {
   tasks: Record<string, Task>;
   showKanban: boolean;
   newWorkspaceModalOpen: boolean;
+
+  // dev / debug
+  /// When true, the orchestrator transmission log shows raw tool_use
+  /// blocks, tool result rows, and "Calling tools:" preambles. Off by
+  /// default — users see only assistant prose + summarised actions.
+  /// Persisted in `localStorage` under `pigide.devTrace`.
+  devTrace: boolean;
 
   // toasts
   toasts: ToastEntry[];
@@ -56,6 +64,7 @@ interface AppStateShape {
   setMaximized: (id: string | null) => void;
 
   setChat: (msgs: ChatMessage[]) => void;
+  setChatScope: (scope: "global" | "workspace") => void;
   upsertChatMessage: (m: ChatMessage) => void;
   appendChatChunk: (id: string, delta: string) => void;
   setOrchestratorStatus: (s: OrchestratorStatus) => void;
@@ -71,6 +80,8 @@ interface AppStateShape {
   removeTask: (id: string) => void;
   setShowKanban: (v: boolean) => void;
   setNewWorkspaceModalOpen: (v: boolean) => void;
+
+  setDevTrace: (v: boolean) => void;
 
   // Clears all workspace-scoped state when switching workspaces.
   clearWorkspaceState: () => void;
@@ -88,6 +99,7 @@ export const useStore = create<AppStateShape>((set) => ({
   maximizedLeafId: null,
 
   chat: [],
+  chatScope: "global",
   orchestratorStatus: "idle",
   draftInput: "",
   queueItems: [],
@@ -99,6 +111,14 @@ export const useStore = create<AppStateShape>((set) => ({
   tasks: {},
   showKanban: false,
   newWorkspaceModalOpen: false,
+
+  devTrace: (() => {
+    try {
+      return localStorage.getItem("pigide.devTrace") === "true";
+    } catch {
+      return false;
+    }
+  })(),
 
   toasts: [],
 
@@ -120,6 +140,7 @@ export const useStore = create<AppStateShape>((set) => ({
   setMaximized: (id) => set({ maximizedLeafId: id }),
 
   setChat: (msgs) => set({ chat: msgs }),
+  setChatScope: (scope) => set({ chatScope: scope }),
   upsertChatMessage: (m) =>
     set((s) => {
       const idx = s.chat.findIndex((x) => x.id === m.id);
@@ -173,6 +194,15 @@ export const useStore = create<AppStateShape>((set) => ({
     }),
   setShowKanban: (v) => set({ showKanban: v }),
   setNewWorkspaceModalOpen: (v) => set({ newWorkspaceModalOpen: v }),
+
+  setDevTrace: (v) => {
+    try {
+      localStorage.setItem("pigide.devTrace", v ? "true" : "false");
+    } catch {
+      // localStorage unavailable — toggle still works in-memory.
+    }
+    set({ devTrace: v });
+  },
 
   clearWorkspaceState: () =>
     set({

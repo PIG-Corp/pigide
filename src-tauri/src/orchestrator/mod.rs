@@ -26,6 +26,10 @@ use tauri::{AppHandle, Emitter};
 
 const HISTORY_LIMIT: i64 = 60;
 const MAX_ITERATIONS: usize = 6;
+/// How many phantom retries we allow per user turn before surfacing the
+/// failure to the user. Two attempts are usually enough — first nag is
+/// generic, the model will either emit the tool or fail cleanly.
+const PHANTOM_MAX_RETRIES: u8 = 2;
 
 pub struct Orchestrator {
     db: DbPool,
@@ -36,6 +40,7 @@ pub struct Orchestrator {
     skills: Arc<SkillRegistry>,
     resolver: Arc<ResolverService>,
     app: RwLock<Option<AppHandle>>,
+    pub abort_trigger: parking_lot::Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
 }
 
 impl Orchestrator {
@@ -57,6 +62,7 @@ impl Orchestrator {
             skills,
             resolver,
             app: RwLock::new(None),
+            abort_trigger: parking_lot::Mutex::new(None),
         }
     }
 
@@ -253,17 +259,33 @@ impl Orchestrator {
                     .map(|t| !t.is_empty())
                     .unwrap_or(false);
                 if has_tc {
-                    let mut text = m.content.clone();
-                    if !text.is_empty() {
-                        text.push_str("\n");
-                    }
-                    text.push_str("Calling tools:");
-                    for tc in m.tool_calls.as_ref().unwrap() {
-                        text.push_str(&format!(
-                            "\n  - {}({})",
-                            tc.function.name, tc.function.arguments
-                        ));
-                    }
+                    // Show the model a TERSE summary of what it called last
+                    // turn, not the full JSON args. The args were already
+                    // executed and their results appear below as
+                    // `[Tool result of …]` user messages, so re-feeding
+                    // arguments here is pure noise. Also strip any
+                    // `Calling tools:` preamble the model itself wrote —
+                    // that text is what leaks into the user UI as JSON
+                    // sludge if we let it round-trip.
+                    let cleaned = phantom::strip_calling_tools_preamble(&m.content);
+                    let names: Vec<&str> = m
+                        .tool_calls
+                        .as_ref()
+                        .unwrap()
+                        .iter()
+                        .map(|tc| tc.function.name.as_str())
+                        .collect();
+                    let summary = if names.is_empty() {
+                        String::new()
+                    } else {
+                        format!("[emitted {} tool call(s): {}]", names.len(), names.join(", "))
+                    };
+                    let text = match (cleaned.is_empty(), summary.is_empty()) {
+                        (true, true) => String::new(),
+                        (true, false) => summary,
+                        (false, true) => cleaned.to_string(),
+                        (false, false) => format!("{}\n{}", cleaned, summary),
+                    };
                     msgs.push(json!({
                         "role": "assistant",
                         "content": text,
@@ -304,8 +326,14 @@ impl Orchestrator {
             // Roll back any partial assistant/tool messages so the next
             // request doesn't replay an inconsistent history.
             let _ = chat::delete_after(&self.db, &session_id, &user_created_at);
-            let m = ChatMessage::system(session_id.clone(), format!("error: {}", e));
-            let _ = chat::insert(&self.db, &m);
+            let err_msg = e.to_string();
+            let marker_text = if err_msg.contains("generation stopped by user") {
+                "(остановлено пользователем)".to_string()
+            } else {
+                format!("error: {}", e)
+            };
+            let m = ChatMessage::system(session_id.clone(), marker_text);
+            let _ = chat::insert(&self.db, &m)?;
             self.emit_message(&m);
         }
         self.emit_status("idle");
@@ -331,11 +359,12 @@ impl Orchestrator {
             .find(|m| m.role == "user")
             .map(|m| m.content);
 
-        // Phantom-tool-call retry latch. We allow at most ONE re-prompt
-        // per user turn: once a phantom is detected, the next iteration
-        // builds the message list with `phantom_nag=true`. After that
-        // turn we either resolved (got a tool_call) or warn the user.
+        // Phantom-tool-call retry latch. We allow up to PHANTOM_MAX_RETRIES
+        // re-prompts per user turn: each detected phantom triggers a
+        // fresh iteration with `phantom_nag=true`. After exhausting the
+        // budget we surface a visible warning to the user.
         let mut phantom_nag = false;
+        let mut phantom_retries: u8 = 0;
         let mut phantom_pending: Option<String> = None;
 
         for iter in 0..MAX_ITERATIONS {
@@ -371,7 +400,18 @@ impl Orchestrator {
                     }
                 }
             });
-            let stream_result = provider.chat_stream(req, delta_tx).await;
+            let (cancel_tx, mut cancel_rx) = tokio::sync::oneshot::channel::<()>();
+            *self.abort_trigger.lock() = Some(cancel_tx);
+
+            let stream_result = tokio::select! {
+                res = provider.chat_stream(req, delta_tx) => res,
+                _ = &mut cancel_rx => {
+                    tracing::info!("Chat generation cancelled by user");
+                    Err(crate::error::Error::Orchestrator("generation stopped by user".into()))
+                }
+            };
+            *self.abort_trigger.lock() = None;
+
             let _ = forwarder.await;
             let assembled = match stream_result {
                 Ok(m) => m,
@@ -404,52 +444,66 @@ impl Orchestrator {
             // 4b. Phantom-tool-call detection.
             //
             // The model narrated an action ("I'll send to agent",
-            // "сейчас вызову X") but emitted no tool_calls. Re-prompt
-            // once with a hard nag; if the SECOND attempt also fails,
-            // surface a visible warning to the user.
+            // "сейчас вызову X") but emitted no tool_calls. Re-prompt up
+            // to PHANTOM_MAX_RETRIES times with a hard nag. After the
+            // budget runs out, surface a visible warning to the user.
             let is_phantom = phantom::is_phantom(&final_text, has_tools);
-            if is_phantom && !phantom_nag {
-                // First detection — log, latch, and loop again with the nag.
-                let model = provider.primary_model().to_string();
-                let ws_path = self.current_workspace_path().unwrap_or_default();
-                phantom::append_event(
-                    &phantom::resolve_log_root(Some(&ws_path)),
-                    &phantom::PhantomEvent::new(&model, &final_text, false, false),
-                );
-                tracing::warn!(
-                    target: "orchestrator::phantom",
-                    "phantom tool_call detected, re-prompting once: {:?}",
-                    final_text.chars().take(120).collect::<String>()
-                );
-                phantom_nag = true;
-                phantom_pending = Some(final_text.clone());
-                continue;
-            }
+            let model = provider.primary_model().to_string();
+            let ws_path = self.current_workspace_path().unwrap_or_default();
+
             if phantom_nag {
-                // We were in retry mode. Record the outcome.
-                let model = provider.primary_model().to_string();
-                let ws_path = self.current_workspace_path().unwrap_or_default();
+                // We were already in retry mode — record the outcome of
+                // the *previous* phantom we re-prompted on.
                 let resolved = !is_phantom;
-                let snippet = phantom_pending.take().unwrap_or_default();
+                let snippet = phantom_pending.clone().unwrap_or_default();
                 phantom::append_event(
                     &phantom::resolve_log_root(Some(&ws_path)),
                     &phantom::PhantomEvent::new(&model, &snippet, true, resolved),
                 );
-                phantom_nag = false;
-                if !resolved {
-                    // Second failure — warn the user and stop the turn.
-                    let warn = ChatMessage::system(
-                        session_id.to_string(),
-                        "warning: model described a tool call but did not emit \
-                         one (phantom tool_call). The action did not execute. \
-                         Try rephrasing your request."
-                            .to_string(),
-                    );
-                    chat::insert(&self.db, &warn)?;
-                    self.emit_message(&warn);
-                    return Ok(());
+                if resolved {
+                    phantom_nag = false;
+                    phantom_pending = None;
+                    // Fall through — the model recovered, proceed normally.
                 }
-                // else fall through — model recovered, treat normally.
+            }
+
+            if is_phantom {
+                if phantom_retries < PHANTOM_MAX_RETRIES {
+                    if !phantom_nag {
+                        // First detection in this user-turn — log the
+                        // initial offending message before re-prompting.
+                        phantom::append_event(
+                            &phantom::resolve_log_root(Some(&ws_path)),
+                            &phantom::PhantomEvent::new(&model, &final_text, false, false),
+                        );
+                    }
+                    tracing::warn!(
+                        target: "orchestrator::phantom",
+                        "phantom tool_call detected (retry {}/{}): {:?}",
+                        phantom_retries + 1,
+                        PHANTOM_MAX_RETRIES,
+                        final_text.chars().take(120).collect::<String>()
+                    );
+                    phantom_nag = true;
+                    phantom_retries += 1;
+                    phantom_pending = Some(final_text.clone());
+                    continue;
+                }
+                // Budget exhausted — surface a warning and end the turn.
+                phantom::append_event(
+                    &phantom::resolve_log_root(Some(&ws_path)),
+                    &phantom::PhantomEvent::new(&model, &final_text, true, false),
+                );
+                let warn = ChatMessage::system(
+                    session_id.to_string(),
+                    "warning: model described a tool call but did not emit \
+                     one (phantom tool_call) after multiple retries. The \
+                     action did not execute. Try rephrasing your request."
+                        .to_string(),
+                );
+                chat::insert(&self.db, &warn)?;
+                self.emit_message(&warn);
+                return Ok(());
             }
 
             if !has_tools {

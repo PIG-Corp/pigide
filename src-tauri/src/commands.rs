@@ -10,7 +10,7 @@ use crate::workspace::Workspace;
 use base64::Engine;
 use serde::Deserialize;
 use std::{path::PathBuf, sync::Arc};
-use tauri::State;
+use tauri::{Emitter, State};
 
 #[tauri::command]
 pub async fn ping() -> std::result::Result<String, String> {
@@ -97,9 +97,27 @@ pub async fn update_layout(
 #[tauri::command]
 pub async fn set_current_workspace(
     state: State<'_, AppState>,
+    app: tauri::AppHandle,
     id: String,
 ) -> std::result::Result<(), String> {
-    db::set_setting(&state.db, "current_workspace_id", &id).map_err(Into::into)
+    db::set_setting(&state.db, "current_workspace_id", &id).map_err(|e| e.to_string())?;
+    // If chat is in workspace scope, the active session changes when the
+    // workspace changes. Resolve and broadcast so the UI reloads history.
+    if let Ok(crate::chat_sessions::ChatScope::Workspace) =
+        crate::chat_sessions::get_scope(&state.db)
+    {
+        if let Ok(cur) = crate::chat_sessions::current(&state.db) {
+            let _ = app.emit(
+                crate::events::EV_CHAT_SCOPE,
+                serde_json::json!({
+                    "scope": cur.scope.as_str(),
+                    "session_id": cur.id,
+                    "workspace_id": cur.workspace_id,
+                }),
+            );
+        }
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -367,23 +385,57 @@ pub async fn clear_chat(state: State<'_, AppState>) -> std::result::Result<(), S
 /// a "(остановлено пользователем)" marker into the session, and emits
 /// `chat://status idle` so the UI re-enables input.
 #[tauri::command]
-pub async fn stop_chat(_state: State<'_, AppState>) -> std::result::Result<bool, String> {
-    // CancelHandle removed — stop is a no-op until re-implemented.
-    Ok(false)
+pub async fn stop_chat(state: State<'_, AppState>) -> std::result::Result<bool, String> {
+    let mut trigger = state.orchestrator.abort_trigger.lock();
+    if let Some(tx) = trigger.take() {
+        let _ = tx.send(());
+        Ok(true)
+    } else {
+        Ok(false)
+    }
 }
 
 // ---------- Chat sessions ----------
 
+#[derive(Deserialize, Default)]
+pub struct ListSessionsArgs {
+    /// `"global"` | `"workspace"` | `"all"` (or omitted = all).
+    #[serde(default)]
+    pub scope: Option<String>,
+    /// Restrict to a specific workspace when scope = workspace.
+    #[serde(default)]
+    pub workspace_id: Option<String>,
+}
+
 #[tauri::command]
 pub async fn list_chat_sessions(
     state: State<'_, AppState>,
+    args: Option<ListSessionsArgs>,
 ) -> std::result::Result<Vec<crate::chat_sessions::ChatSession>, String> {
-    crate::chat_sessions::list(&state.db).map_err(Into::into)
+    let args = args.unwrap_or_default();
+    let scope = match args.scope.as_deref() {
+        None | Some("all") | Some("") => None,
+        Some(s) => Some(
+            crate::chat_sessions::ChatScope::parse(s)
+                .ok_or_else(|| format!("invalid scope: {}", s))?,
+        ),
+    };
+    let filter = crate::chat_sessions::ListFilter {
+        scope,
+        workspace_id: args.workspace_id,
+    };
+    crate::chat_sessions::list(&state.db, &filter).map_err(Into::into)
 }
 
 #[derive(Deserialize)]
 pub struct CreateSessionArgs {
     pub name: String,
+    /// `"global"` (default for back-compat) | `"workspace"`.
+    #[serde(default)]
+    pub scope: Option<String>,
+    /// Required when `scope == "workspace"`.
+    #[serde(default)]
+    pub workspace_id: Option<String>,
 }
 
 #[tauri::command]
@@ -391,7 +443,13 @@ pub async fn create_chat_session(
     state: State<'_, AppState>,
     args: CreateSessionArgs,
 ) -> std::result::Result<crate::chat_sessions::ChatSession, String> {
-    crate::chat_sessions::create(&state.db, &args.name).map_err(Into::into)
+    let scope = match args.scope.as_deref() {
+        None | Some("global") => crate::chat_sessions::ChatScope::Global,
+        Some("workspace") => crate::chat_sessions::ChatScope::Workspace,
+        Some(other) => return Err(format!("invalid scope: {}", other)),
+    };
+    crate::chat_sessions::create(&state.db, &args.name, scope, args.workspace_id.as_deref())
+        .map_err(Into::into)
 }
 
 #[derive(Deserialize)]
@@ -419,16 +477,63 @@ pub async fn delete_chat_session(
 #[tauri::command]
 pub async fn get_current_session(
     state: State<'_, AppState>,
-) -> std::result::Result<String, String> {
-    crate::chat_sessions::ensure_current(&state.db).map_err(Into::into)
+    app: tauri::AppHandle,
+) -> std::result::Result<crate::chat_sessions::CurrentSession, String> {
+    let cur = crate::chat_sessions::current(&state.db).map_err(|e| e.to_string())?;
+    // Best-effort: if `current` had to lazily mint a session, surface the
+    // change so the UI updates without a manual refresh.
+    let _ = app.emit(
+        crate::events::EV_CHAT_SCOPE,
+        serde_json::json!({
+            "scope": cur.scope.as_str(),
+            "session_id": cur.id,
+            "workspace_id": cur.workspace_id,
+        }),
+    );
+    Ok(cur)
 }
 
 #[tauri::command]
 pub async fn set_current_session(
     state: State<'_, AppState>,
+    app: tauri::AppHandle,
     id: String,
-) -> std::result::Result<(), String> {
-    crate::chat_sessions::set_current(&state.db, &id).map_err(Into::into)
+) -> std::result::Result<crate::chat_sessions::CurrentSession, String> {
+    let cur = crate::chat_sessions::set_current(&state.db, &id).map_err(|e| e.to_string())?;
+    let _ = app.emit(
+        crate::events::EV_CHAT_SCOPE,
+        serde_json::json!({
+            "scope": cur.scope.as_str(),
+            "session_id": cur.id,
+            "workspace_id": cur.workspace_id,
+        }),
+    );
+    Ok(cur)
+}
+
+#[derive(Deserialize)]
+pub struct SetChatScopeArgs {
+    pub scope: String,
+}
+
+#[tauri::command]
+pub async fn set_chat_scope(
+    state: State<'_, AppState>,
+    app: tauri::AppHandle,
+    args: SetChatScopeArgs,
+) -> std::result::Result<crate::chat_sessions::CurrentSession, String> {
+    let scope = crate::chat_sessions::ChatScope::parse(&args.scope)
+        .ok_or_else(|| format!("invalid scope: {}", args.scope))?;
+    let cur = crate::chat_sessions::switch_scope(&state.db, scope).map_err(|e| e.to_string())?;
+    let _ = app.emit(
+        crate::events::EV_CHAT_SCOPE,
+        serde_json::json!({
+            "scope": cur.scope.as_str(),
+            "session_id": cur.id,
+            "workspace_id": cur.workspace_id,
+        }),
+    );
+    Ok(cur)
 }
 
 // ---------- Settings ----------

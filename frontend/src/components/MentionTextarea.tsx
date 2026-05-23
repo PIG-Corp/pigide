@@ -2,6 +2,7 @@ import {
   forwardRef,
   useEffect,
   useImperativeHandle,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -89,6 +90,13 @@ export const MentionTextarea = forwardRef<MentionTextareaHandle, MentionTextarea
       focus: () => taRef.current?.focus(),
       textarea: () => taRef.current,
     }));
+
+    useLayoutEffect(() => {
+      const ta = taRef.current;
+      if (!ta) return;
+      ta.style.height = "auto";
+      ta.style.height = `${Math.min(ta.scrollHeight, 200)}px`;
+    }, [value]);
 
     // Lazily fetch tasks the first time a mention pop appears.
     useEffect(() => {

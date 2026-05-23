@@ -322,6 +322,22 @@ pub async fn dispatch(
             db::set_setting(db, "current_workspace_id", id)?;
             if let Some(app) = app {
                 let _ = app.emit(EV_WORKSPACE_CHANGED, json!({ "current_workspace_id": id }));
+                // If chat is workspace-scoped, the active session just
+                // changed too — broadcast so the UI swaps history.
+                if let Ok(crate::chat_sessions::ChatScope::Workspace) =
+                    crate::chat_sessions::get_scope(db)
+                {
+                    if let Ok(cur) = crate::chat_sessions::current(db) {
+                        let _ = app.emit(
+                            crate::events::EV_CHAT_SCOPE,
+                            json!({
+                                "scope": cur.scope.as_str(),
+                                "session_id": cur.id,
+                                "workspace_id": cur.workspace_id,
+                            }),
+                        );
+                    }
+                }
             }
             Ok(json!({"current_workspace_id": id}))
         }

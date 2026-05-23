@@ -45,7 +45,7 @@ fn migrate_one(conn: &rusqlite::Connection) -> Result<()> {
     let current: i64 = conn
         .query_row("PRAGMA user_version;", [], |r| r.get(0))
         .unwrap_or(0);
-    let target = 14;
+    let target = 15;
     if current >= target {
         return Ok(());
     }
@@ -484,6 +484,21 @@ fn migrate_one(conn: &rusqlite::Connection) -> Result<()> {
              END;
 
              INSERT INTO memory_fts(memory_fts) VALUES('rebuild');
+             COMMIT;",
+        )?;
+    }
+    if current < 15 {
+        // Per-workspace chat scope: each chat_sessions row can be either
+        // global (workspace_id IS NULL — back-compat with v9) or scoped to
+        // a specific workspace (workspace_id NOT NULL, cascade-deleted with
+        // its workspace). Existing rows stay global by leaving the column
+        // NULL.
+        conn.execute_batch(
+            "BEGIN;
+             ALTER TABLE chat_sessions ADD COLUMN workspace_id TEXT
+                 REFERENCES workspaces(id) ON DELETE CASCADE;
+             CREATE INDEX IF NOT EXISTS idx_chat_sessions_ws
+                ON chat_sessions(workspace_id);
              COMMIT;",
         )?;
     }

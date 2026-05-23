@@ -93,6 +93,16 @@ export const ipc = {
   listChatQueue: () => invoke<QueueItem[]>("list_chat_queue"),
   cancelChatQueueItem: (id: string) =>
     invoke<boolean>("cancel_chat_queue_item", { id }),
+  setChatScope: (scope: "global" | "workspace") =>
+    invoke<any>("set_chat_scope", { args: { scope } }),
+  getCurrentSession: () =>
+    invoke<any>("get_current_session"),
+  setChatSession: (id: string) =>
+    invoke<any>("set_current_session", { id }),
+  createChatSession: (name: string, scope: "global" | "workspace", workspaceId?: string | null) =>
+    invoke<any>("create_chat_session", { args: { name, scope, workspace_id: workspaceId } }),
+  listChatSessions: (args?: { scope?: "global" | "workspace" | "all"; workspace_id?: string | null }) =>
+    invoke<any[]>("list_chat_sessions", { args }),
   chatQueueSetContinueOnError: (continueOnError: boolean) =>
     invoke<void>("chat_queue_set_continue_on_error", {
       args: { continue_on_error: continueOnError },
@@ -503,9 +513,13 @@ export function onVoiceTranscript(
   return listen<VoiceTranscriptEvent>("voice://transcript", (e) => cb(e.payload));
 }
 export function onVoiceDownload(
-  cb: (e: VoiceDownloadEvent) => void,
+  cb: (e: { bytes: number; total: number }) => void,
 ): Promise<UnlistenFn> {
-  return listen<VoiceDownloadEvent>("voice://download", (e) => cb(e.payload));
+  return listen<{ bytes: number; total: number }>("voice://download", (e) => cb(e.payload));
+}
+export type ChatScopeEvent = { scope: "global" | "workspace"; session_id: string; workspace_id: string | null };
+export function onChatScopeChanged(cb: (e: ChatScopeEvent) => void): Promise<UnlistenFn> {
+  return listen<ChatScopeEvent>("chat://scope", (e) => cb(e.payload));
 }
 
 // ---------- Deep links (#17) ----------

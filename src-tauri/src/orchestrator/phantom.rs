@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 /// content before matching. Keep in sync with the prompt's "forbidden
 /// phrases" list in `prompt.rs`.
 const TRIGGER_PHRASES: &[&str] = &[
-    // English
+    // English — narrative announcements
     "i called",
     "i will call",
     "i'll call",
@@ -28,7 +28,17 @@ const TRIGGER_PHRASES: &[&str] = &[
     "let me invoke",
     "let me call",
     "let me send",
-    // Russian
+    // English — explicit "I'm about to call tools" preambles. These leak
+    // when the model "narrates" the call instead of emitting the tool_use
+    // block. Catching them here forces a retry.
+    "calling tools:",
+    "calling tool:",
+    "tool_use:",
+    "tool calls:",
+    "tool call:",
+    "invoking tool",
+    "invoking tools",
+    // Russian — narrative announcements
     "вызвал тулз",
     "вызвала тулз",
     "вызвал тул",
@@ -41,11 +51,44 @@ const TRIGGER_PHRASES: &[&str] = &[
     "сейчас вызову",
     "сейчас отправлю",
     "сейчас закину",
+    // Russian — explicit preambles
+    "вызываю тулзы:",
+    "вызываю тулз:",
+    "вызываю инструмент",
+    "вызываю:",
+    "вызываю тул",
 ];
 
 /// Hard nag injected as a system message on the retry turn.
 pub const RETRY_NAG: &str = "You described an action but emitted no tool_call. \
-Emit the tool_call NOW. Do not narrate.";
+Emit the tool_call NOW. Do not narrate. Do not write 'Calling tools:' or \
+'вызываю:' as text — emit the tool_use block directly.";
+
+/// Strip the noisy `Calling tools:` narrative block we used to append to
+/// rebuilt assistant messages. Returns the text up to (but not including)
+/// the first `Calling tools:` / `вызываю тулзы:` line so historical
+/// messages stay terse when fed back to the model.
+pub fn strip_calling_tools_preamble(text: &str) -> &str {
+    const MARKERS: &[&str] = &[
+        "\nCalling tools:",
+        "\ncalling tools:",
+        "Calling tools:",
+        "\nВызываю тулзы:",
+        "Вызываю тулзы:",
+    ];
+    let lower = text.to_lowercase();
+    let mut cut: Option<usize> = None;
+    for m in MARKERS {
+        if let Some(i) = lower.find(&m.to_lowercase()) {
+            cut = Some(cut.map(|c| c.min(i)).unwrap_or(i));
+        }
+    }
+    match cut {
+        Some(0) => "",
+        Some(i) => text[..i].trim_end_matches(['\n', ' ']),
+        None => text,
+    }
+}
 
 /// Returns `true` when `content` contains a trigger phrase AND no
 /// tool_calls were emitted. An empty content with tool_calls is fine; a
@@ -152,6 +195,46 @@ mod tests {
     fn case_insensitive_match() {
         assert!(is_phantom("I'LL SEND THE PROMPT NOW", false));
         assert!(is_phantom("LET ME RUN search", false));
+    }
+
+    #[test]
+    fn detects_calling_tools_preamble_without_tools() {
+        assert!(is_phantom(
+            "Calling tools:\n  - send_to_agent(...)",
+            false
+        ));
+        assert!(is_phantom("вызываю тулзы:\n  - update_task(...)", false));
+        assert!(is_phantom("Tool_use: spawn_agent", false));
+    }
+
+    #[test]
+    fn calling_tools_preamble_ok_when_tools_actually_emitted() {
+        // Real tool_calls present → not phantom even if model also wrote
+        // the noisy preamble (we strip it elsewhere; we don't reject here).
+        assert!(!is_phantom(
+            "Calling tools:\n  - send_to_agent(...)",
+            true
+        ));
+    }
+
+    #[test]
+    fn strip_preamble_basic() {
+        let s = "Поднял aider.\nCalling tools:\n  - send_to_agent(...)";
+        assert_eq!(strip_calling_tools_preamble(s), "Поднял aider.");
+    }
+
+    #[test]
+    fn strip_preamble_only_preamble() {
+        assert_eq!(
+            strip_calling_tools_preamble("Calling tools:\n  - foo()"),
+            ""
+        );
+    }
+
+    #[test]
+    fn strip_preamble_no_marker_passes_through() {
+        let s = "All good, no preamble.";
+        assert_eq!(strip_calling_tools_preamble(s), s);
     }
 
     #[test]
