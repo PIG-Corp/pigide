@@ -66,6 +66,7 @@ export function TilingArea() {
             <button onClick={() => spawn("opencode")}>+ opencode</button>
             <button onClick={() => spawn("devin")}>+ devin</button>
             <button onClick={() => spawn("agy")}>+ agy</button>
+            <button onClick={() => spawn("codex")}>+ codex</button>
           </div>
         </div>
       );
@@ -107,7 +108,7 @@ export function TilingArea() {
     );
   };
 
-  const spawn = async (kind: "kiro-cli" | "claude" | "opencode" | "devin" | "agy") => {
+  const spawn = async (kind: "kiro-cli" | "claude" | "opencode" | "devin" | "agy" | "codex") => {
     if (!currentId) return;
     try {
       const list = await ipc.spawnAgent(currentId, kind);
@@ -129,6 +130,7 @@ export function TilingArea() {
           <button onClick={() => spawn("opencode")}>+ opencode</button>
           <button onClick={() => spawn("devin")}>+ devin</button>
           <button onClick={() => spawn("agy")}>+ agy</button>
+          <button onClick={() => spawn("codex")}>+ codex</button>
           <span className="spacer" />
           <span className="tiling-area-meta">
             maximized: {maximizedLeafId.slice(0, 8)}
@@ -153,6 +155,7 @@ export function TilingArea() {
         <button onClick={() => spawn("opencode")}>+ opencode</button>
         <button onClick={() => spawn("devin")}>+ devin</button>
         <button onClick={() => spawn("agy")}>+ agy</button>
+        <button onClick={() => spawn("codex")}>+ codex</button>
         <span className="spacer" />
         <div className="room-menu-wrap">
           <button

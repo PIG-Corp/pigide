@@ -50,7 +50,7 @@ export const ipc = {
 
   spawnAgent: (
     workspaceId: string,
-    agentType: "kiro-cli" | "claude" | "opencode" | "devin" | "agy",
+    agentType: "kiro-cli" | "claude" | "opencode" | "devin" | "agy" | "codex",
     opts: { cwd?: string | null; count?: number; autoLayout?: boolean } = {},
   ) =>
     invoke<Agent[]>("spawn_agent", {

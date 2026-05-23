@@ -199,7 +199,7 @@ export default function App() {
               break;
             }
             const at = e.route.agent_type as
-              | "kiro-cli" | "claude" | "opencode" | "devin" | "agy";
+              | "kiro-cli" | "claude" | "opencode" | "devin" | "agy" | "codex";
             await ipc.spawnAgent(ws, at, { cwd: e.route.cwd ?? undefined });
             break;
           }

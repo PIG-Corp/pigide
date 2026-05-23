@@ -12,6 +12,7 @@ const AGENT_TYPES: { value: string; label: string }[] = [
   { value: "opencode", label: "OpenCode" },
   { value: "devin", label: "Devin" },
   { value: "agy", label: "Antigravity CLI" },
+  { value: "codex", label: "OpenAI Codex" },
 ];
 
 /**

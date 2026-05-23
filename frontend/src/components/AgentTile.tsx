@@ -297,7 +297,7 @@ export function AgentTile({ agent, isFocused, isMaximized }: Props) {
     try {
       const [a] = await ipc.spawnAgent(
         currentId,
-        agent.agent_type as "kiro-cli" | "claude" | "opencode" | "devin" | "agy",
+        agent.agent_type as "kiro-cli" | "claude" | "opencode" | "devin" | "agy" | "codex",
         { autoLayout: false, cwd: agent.cwd },
       );
       removeAgent(agent.id);
@@ -315,7 +315,7 @@ export function AgentTile({ agent, isFocused, isMaximized }: Props) {
     try {
       const [a] = await ipc.spawnAgent(
         currentId,
-        agent.agent_type as "kiro-cli" | "claude" | "opencode" | "devin" | "agy",
+        agent.agent_type as "kiro-cli" | "claude" | "opencode" | "devin" | "agy" | "codex",
         { autoLayout: false },
       );
       upsertAgent(a);
