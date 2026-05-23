@@ -62,6 +62,13 @@ pub fn resolve_binary(db: &DbPool, agent_type: &AgentType) -> String {
             return v;
         }
     }
+    if matches!(agent_type, AgentType::Codex) {
+        if let Ok(v) = std::env::var("PIGIDE_CODEX_BIN") {
+            if !v.trim().is_empty() && Path::new(&v).exists() {
+                return v;
+            }
+        }
+    }
     let home = std::env::var("HOME").unwrap_or_default();
     let candidates: Vec<String> = match agent_type {
         AgentType::KiroCli => vec![
@@ -106,6 +113,15 @@ pub fn resolve_binary(db: &DbPool, agent_type: &AgentType) -> String {
             "/usr/local/bin/agy".into(),
             "/usr/bin/agy".into(),
             "agy".into(),
+        ],
+        AgentType::Codex => vec![
+            format!("{}/.local/bin/codex", home),
+            format!("{}/.npm-global/bin/codex", home),
+            format!("{}/.bun/bin/codex", home),
+            "/usr/local/bin/codex".into(),
+            "/opt/homebrew/bin/codex".into(),
+            "/usr/bin/codex".into(),
+            "codex".into(),
         ],
         AgentType::Ssh => vec![
             "/usr/bin/ssh".into(),
@@ -159,6 +175,7 @@ pub fn resolve_argv(
         AgentType::OpenCode => &[],
         AgentType::Devin => &[],
         AgentType::Agy => &[],
+        AgentType::Codex => &[],
         AgentType::Ssh => &[],
     };
 

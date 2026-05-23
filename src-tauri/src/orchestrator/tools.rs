@@ -65,7 +65,7 @@ pub fn tool_definitions() -> Vec<Value> {
             json!({
                 "type": "object",
                 "properties": {
-                    "agent_type": {"type": "string", "enum": ["kiro-cli", "claude", "aider", "goose", "opencode", "devin"]},
+                    "agent_type": {"type": "string", "enum": ["kiro-cli", "claude", "aider", "goose", "opencode", "devin", "codex"]},
                     "count": {"type": "integer", "minimum": 1, "maximum": 32, "default": 1},
                     "cwd": {"type": "string"}
                 },

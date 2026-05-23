@@ -118,6 +118,7 @@ pub enum AgentType {
     OpenCode,
     Devin,
     Agy,
+    Codex,
     Ssh,
 }
 
@@ -131,6 +132,7 @@ impl AgentType {
             AgentType::OpenCode => "opencode",
             AgentType::Devin => "devin",
             AgentType::Agy => "agy",
+            AgentType::Codex => "codex",
             AgentType::Ssh => "ssh",
         }
     }
@@ -143,6 +145,7 @@ impl AgentType {
             "opencode" | "oc" => Some(AgentType::OpenCode),
             "devin" | "devin-cli" => Some(AgentType::Devin),
             "agy" | "antigravity" => Some(AgentType::Agy),
+            "codex" | "openai-codex" => Some(AgentType::Codex),
             "ssh" => Some(AgentType::Ssh),
             _ => None,
         }
@@ -691,6 +694,7 @@ mod tests {
             ("opencode", AgentType::OpenCode),
             ("devin", AgentType::Devin),
             ("agy", AgentType::Agy),
+            ("codex", AgentType::Codex),
             ("ssh", AgentType::Ssh),
         ];
         for (s, t) in &cases {
@@ -706,6 +710,7 @@ mod tests {
         assert_eq!(AgentType::parse("oc"), Some(AgentType::OpenCode));
         assert_eq!(AgentType::parse("devin-cli"), Some(AgentType::Devin));
         assert_eq!(AgentType::parse("antigravity"), Some(AgentType::Agy));
+        assert_eq!(AgentType::parse("openai-codex"), Some(AgentType::Codex));
         assert_eq!(AgentType::parse("unknown"), None);
     }
 
