@@ -1,8 +1,137 @@
-# PigIDE
+<div align="center">
 
-A Rust + Tauri 2 desktop IDE that hosts multiple interactive CLI agents (Kiro CLI, Claude Code) as tiled terminal panes, with a voice/text orchestrator that uses OmniRouter to manage workspaces and agents from natural-language commands.
+  <picture>
+    <source srcset=".github/readme/hero.webp" type="image/webp"/>
+    <img src=".github/readme/hero.gif" alt="PigIDE — Intent Into Motion" width="100%"/>
+  </picture>
 
-> See [`docs/superpowers/specs/2026-05-14-pigide-design.md`](docs/superpowers/specs/2026-05-14-pigide-design.md) for the full design.
+  <br/>
+
+  [![License](https://img.shields.io/badge/license-MIT-0a0708?style=flat-square&labelColor=0a0708&color=ff3366)](LICENSE)
+  [![Stack](https://img.shields.io/badge/tauri_2-rust-0a0708?style=flat-square&labelColor=0a0708&color=ffffff)](#stack)
+  [![Platform](https://img.shields.io/badge/macOS_·_Linux_·_Windows-0a0708?style=flat-square&labelColor=0a0708&color=ffffff)](#prerequisites)
+  [![CoC](https://img.shields.io/badge/contributor_covenant-2.1-0a0708?style=flat-square&labelColor=0a0708&color=ffffff)](CODE_OF_CONDUCT.md)
+
+  <br/>
+
+  **A desktop IDE that hosts a pool of CLI coding agents as tiled terminal panes.**
+  <br/>You direct. The swarm builds. Voice in. Code out.
+
+  <sub>See <a href="docs/superpowers/specs/2026-05-14-pigide-design.md"><code>docs/superpowers/specs/2026-05-14-pigide-design.md</code></a> for the full design.</sub>
+
+</div>
+
+---
+
+## Quickstart
+
+```bash
+git clone https://github.com/<your-fork>/pigide
+cd pigide/frontend && pnpm install && cd ../src-tauri
+cargo tauri dev
+```
+
+Once the window is open:
+
+1. **+** in the Workspaces sidebar — your first workspace.
+2. **+ kiro-cli** (or any agent type) inside an empty TilingArea — terminal tile spawns with the agent already running.
+3. Talk to the orchestrator on the right pane to dispatch tasks across tiles.
+4. `Ctrl+,` opens Settings · `Ctrl+1..9` jumps between workspaces.
+
+For voice: hold the configured PTT hotkey (off by default — bind in `Settings → Voice`) and speak. Partials stream into the focused input within 300 ms.
+
+<br/>
+
+## What's inside
+
+<table>
+<tr>
+<td width="50%" valign="top">
+<img src=".github/readme/screens/swarm.png" alt="Swarm orchestration" width="100%"/>
+<br/><br/>
+
+### `01 / Swarm` &nbsp;Orchestration
+
+Coordinate a roster of specialised agents — `aider`, `claude`, `opencode`, `devin`, `agy`, `codex` — each in a tiled terminal pane. Roles: orchestrator, builder, reviewer, scout. You speak, the layout reacts.
+
+`tiled panes` · `role routing` · `live layout`
+
+</td>
+<td width="50%" valign="top">
+<img src=".github/readme/screens/workflow.png" alt="Autonomous workflow" width="100%"/>
+<br/><br/>
+
+### `02 / Workflow` &nbsp;Autonomous
+
+Built-in task state machine, file locks, and review gates with quorum voting keep the swarm aligned and code pristine across multiple agents working the same repo.
+
+`state machine` · `file locks` · `quorum gates`
+
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+<img src=".github/readme/screens/pigvoice.png" alt="PigVoice" width="100%"/>
+<br/><br/>
+
+### `03 / Voice` &nbsp;Sub-300 ms
+
+Speak in plain language. Local STT streams partials to the orchestrator while you're still talking. No round-trip to the cloud.
+
+`local STT` · `streaming` · `VAD`
+
+</td>
+<td width="50%" valign="top">
+<img src=".github/readme/screens/memory.png" alt="Workspace memory" width="100%"/>
+<br/><br/>
+
+### `04 / Memory` &nbsp;Workspace
+
+Conversations, decisions, and artifacts persist per workspace. Agents recall context across restarts; you keep the receipts.
+
+`SQLite` · `per-workspace` · `structured`
+
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+<img src=".github/readme/screens/watcher.png" alt="Background watcher" width="100%"/>
+<br/><br/>
+
+### `05 / Watcher` &nbsp;Background
+
+A seamless supervisor on Gemini Flash-Lite that monitors agent stdout, classifies events, and intelligently escalates blockers to human review without hanging the swarm.
+
+`Gemini` · `stdout classify` · `human escalate`
+
+</td>
+<td width="50%" valign="top">
+<img src=".github/readme/screens/skills.png" alt="Extensible skills" width="100%"/>
+<br/><br/>
+
+### `06 / Skills` &nbsp;Extensible
+
+Dynamic Architect prompt-modules. Auto-discovered YAML definitions, hot-reloading context injections, tailored per turn. Your prompts become a system.
+
+`YAML` · `hot-reload` · `per-turn inject`
+
+</td>
+</tr>
+</table>
+
+<br/>
+
+<div align="center">
+  <img src=".github/readme/stats.svg" alt="6 agent runtimes · 300 ms voice latency · 120k GPU particles · 100% local" width="100%"/>
+</div>
+
+<br/>
+
+<div align="center">
+  <img src=".github/readme/marquee.svg" alt="Conduct the swarm · You direct · Agents build" width="100%"/>
+</div>
+
+<br/>
 
 ## Stack
 
@@ -17,7 +146,12 @@ A Rust + Tauri 2 desktop IDE that hosts multiple interactive CLI agents (Kiro CL
 - An OmniRouter instance running locally (defaults to `http://localhost:20128`)
 - `~/.local/bin/kiro-cli` and `/usr/bin/claude` for the agent tiles
 
-## Run (development)
+<br/>
+
+## Build
+
+<details>
+<summary><b>Development run</b> — <code>cargo tauri dev</code></summary>
 
 ```bash
 # Install frontend deps
@@ -31,7 +165,10 @@ cargo tauri dev
 # (or, if @tauri-apps/cli is installed in frontend/, `pnpm tauri dev` from frontend/)
 ```
 
-## Build (release)
+</details>
+
+<details>
+<summary><b>Release build</b> — <code>./scripts/build.sh</code></summary>
 
 Один скрипт собирает фронтенд и Tauri-приложение, автоматически выбирает Whisper-бэкенд (GPU/CPU) и складывает всё в `./dist/` в корне репозитория.
 
@@ -62,37 +199,33 @@ PIGIDE_GPU=cpu     ./scripts/build.sh   # CPU-only
 
 Перед сборкой скрипт показывает **preflight**: текущая ветка, коммит, ahead/behind относительно `origin/main` и список незакоммиченных изменений. Если working tree грязный — спросит подтверждение (это страховка от ситуации, когда забыл закоммитить и потом потерял правки при checkout). Чтобы пропускать вопрос в CI: `PIGIDE_BUILD_DIRTY=1 ./scripts/build.sh`.
 
-## First-run notes
+</details>
+
+<details>
+<summary><b>First-run notes</b> — где живут данные, логи, модели</summary>
 
 - Database: `~/.config/pigide/db.sqlite`
 - Whisper model: downloaded on first PTT use to `~/.cache/pigide/ggml-small.bin`
 - Logs: stderr, set `RUST_LOG=pigide=debug,info`
 
+</details>
+
+<br/>
+
 ## Architect model
 
-The Kiro orchestrator runs against a swappable LLM backend. Default is the
-**Anthropic Messages API** with **Claude Opus 4.5** as primary and **Claude
-Opus 4** as automatic fallback on `5xx` / `529` / timeout. Set
-`ANTHROPIC_API_KEY` in the environment, or paste a key into
-`Right pane → Settings → API key`.
+The Kiro orchestrator runs against a swappable LLM backend. Default is the **Anthropic Messages API** with **Claude Opus 4.5** as primary and **Claude Opus 4** as automatic fallback on `5xx` / `529` / timeout. Set `ANTHROPIC_API_KEY` in the environment, or paste a key into `Right pane → Settings → API key`.
 
-OmniRouter (OpenAI-compatible) remains available — switch via
-`Right pane → Settings → Provider`. See [`docs/architect-model.md`](docs/architect-model.md)
-for the full feature list (streaming, tool calls, prompt caching, fallback
-policy).
+OmniRouter (OpenAI-compatible) remains available — switch via `Right pane → Settings → Provider`. See [`docs/architect-model.md`](docs/architect-model.md) for the full feature list (streaming, tool calls, prompt caching, fallback policy).
+
+<br/>
 
 ## Watcher (опционально)
 
-Watcher — фоновый супервизор, который слушает stdout каждого спавненного
-агента, классифицирует чанки через Google AI Studio Generative Language
-API (по умолчанию `gemini-2.5-flash-lite` — Gemma 3 4B IT из изначального
-брифа AI Studio v1beta больше не отдаёт; live-проверка показала, что
-Gemma 4 31B уходит в reasoning-prose вместо строгого JSON, а Flash-Lite
-обеспечивает strict-JSON и стоит в ~10× меньше) и эскалирует «вопросы к
-человеку» Architect'у в почтовый ящик `role:coordinator`, на тред
-`watcher:<agent_id>`. Ответ Architect'а автоматически инжектится обратно
-в stdin исходного агента — агент не зависает на интерактивном prompt'е,
-пока вы не подойдёте.
+<details>
+<summary>Фоновый супервизор stdout агентов на Gemini Flash-Lite</summary>
+
+Watcher слушает stdout каждого спавненного агента, классифицирует чанки через Google AI Studio Generative Language API (по умолчанию `gemini-2.5-flash-lite` — Gemma 3 4B IT из изначального брифа AI Studio v1beta больше не отдаёт; live-проверка показала, что Gemma 4 31B уходит в reasoning-prose вместо строгого JSON, а Flash-Lite обеспечивает strict-JSON и стоит в ~10× меньше) и эскалирует «вопросы к человеку» Architect'у в почтовый ящик `role:coordinator`, на тред `watcher:<agent_id>`. Ответ Architect'а автоматически инжектится обратно в stdin исходного агента — агент не зависает на интерактивном prompt'е, пока вы не подойдёте.
 
 ### Включить
 
@@ -105,8 +238,7 @@ cargo build --features watcher
 GEMINI_API_KEY=AIzaSy... cargo tauri dev --features watcher
 ```
 
-Без `GEMINI_API_KEY` Watcher тихо отключится при старте (одна warning-строка
-в логах) — остальное приложение работает как обычно.
+Без `GEMINI_API_KEY` Watcher тихо отключится при старте (одна warning-строка в логах) — остальное приложение работает как обычно.
 
 ### Переменные окружения
 
@@ -114,7 +246,7 @@ GEMINI_API_KEY=AIzaSy... cargo tauri dev --features watcher
 |-|-|-|
 | `GEMINI_API_KEY` | — (обязательна) | Ключ Google AI Studio. Уходит только в заголовке `x-goog-api-key`, не в URL и не в логи. |
 | `PIGIDE_WATCHER_RPM` | `10` | Per-agent rate-limit (запросов в минуту). Token-bucket: при переполнении чанк дропается, не ставится в очередь. |
-| `PIGIDE_WATCHER_MODEL` | `gemini-2.5-flash-lite` | Имя модели Generative Language API. Меняй, если у твоего ключа доступна другая Gemma/Gemini-Flash-Lite. Парсер устойчив к prose-обрамлению, поэтому Gemma-семейство тоже сработает (но с худшей точностью на реальных reasoning-моделях). |
+| `PIGIDE_WATCHER_MODEL` | `gemini-2.5-flash-lite` | Имя модели Generative Language API. Меняй, если у твоего ключа доступна другая Gemma/Gemini-Flash-Lite. |
 
 ### MCP-инструмент
 
@@ -124,21 +256,20 @@ GEMINI_API_KEY=AIzaSy... cargo tauri dev --features watcher
 { "method": "tools/call", "params": { "name": "watcher_status", "arguments": {} } }
 ```
 
-Возвращает `{enabled, rpm, agents: { <agent_id>: {last_classification,
-calls_this_minute, blocked_until, dropped} }}` — удобно для дашбордов и для
-проверки, что бакет не залип.
+Возвращает `{enabled, rpm, agents: { <agent_id>: {last_classification, calls_this_minute, blocked_until, dropped} }}` — удобно для дашбордов и для проверки, что бакет не залип.
 
 ### Стоимость
 
-`gemini-2.5-flash-lite` доступен в free-tier AI Studio с per-project
-лимитом порядка 30 RPM на ключ (на момент написания). Дефолт
-`PIGIDE_WATCHER_RPM=10` подобран так, чтобы один агент не выедал лимит
-ключа в одиночку; если у вас десяток активных агентов — учитывайте, что
-лимит делится между ними. На paid-тарифах Flash-Lite — самая дешёвая
-модель Gemini API, ~$0.075 за 1M входных токенов и $0.30 за 1M выходных
-(текст).
+`gemini-2.5-flash-lite` доступен в free-tier AI Studio с per-project лимитом порядка 30 RPM на ключ (на момент написания). Дефолт `PIGIDE_WATCHER_RPM=10` подобран так, чтобы один агент не выедал лимит ключа в одиночку. На paid-тарифах Flash-Lite — самая дешёвая модель Gemini API, ~$0.075 за 1M входных токенов и $0.30 за 1M выходных (текст).
+
+</details>
+
+<br/>
 
 ## PigVoice — instant voice-to-text
+
+<details>
+<summary>Streaming voice layer · sub-300 ms perceived latency · LocalAgreement-2 merger</summary>
 
 PigVoice is the streaming voice layer baked into PigIDE. Goal: **sub-300 ms perceived latency** from speech to first visible token, with partial hypotheses dropped straight into the focused input.
 
@@ -172,13 +303,7 @@ The streaming path defaults to `tiny` for first-token speed; pick a larger model
 
 ### GPU acceleration (optional)
 
-By default PigIDE builds Whisper CPU-only. The release build script
-(`./scripts/build.sh`) автоматически определяет GPU; чтобы выбрать
-вручную, экспортни `PIGIDE_GPU=cuda|hipblas|vulkan|metal|cpu` —
-см. секцию [Build (release)](#build-release). Whisper-контекст пробует
-GPU и откатывается на CPU с `warn!`-логом, если инициализация
-не удалась (нет toolkit'а, нет устройства, OOM и т.д.). В рантайме
-форсить CPU — `PIGIDE_WHISPER_CPU=1`.
+By default PigIDE builds Whisper CPU-only. The release build script (`./scripts/build.sh`) автоматически определяет GPU; чтобы выбрать вручную, экспортни `PIGIDE_GPU=cuda|hipblas|vulkan|metal|cpu` — см. секцию [Build](#build). Whisper-контекст пробует GPU и откатывается на CPU с `warn!`-логом, если инициализация не удалась (нет toolkit'а, нет устройства, OOM и т.д.). В рантайме форсить CPU — `PIGIDE_WHISPER_CPU=1`.
 
 Системные зависимости по бэкендам:
 
@@ -218,12 +343,16 @@ cargo test --test integration_streaming
 cargo test --test bench_latency --release
 ```
 
+</details>
+
+<br/>
+
 ## Skills — extensible Architect prompt-modules
 
-The Architect's prompt is no longer fixed. **Skills** are small named
-`.md` modules with a YAML frontmatter that the Architect auto-discovers
-from `~/.pigide/skills/` and `<workspace>/.pigide/skills/` and selects
-per turn (by tags / triggers / explicit `@skill:<id>` mention).
+<details>
+<summary>Auto-discovered YAML modules · hot-reload · per-turn injection</summary>
+
+The Architect's prompt is no longer fixed. **Skills** are small named `.md` modules with a YAML frontmatter that the Architect auto-discovers from `~/.pigide/skills/` and `<workspace>/.pigide/skills/` and selects per turn (by tags / triggers / explicit `@skill:<id>` mention).
 
 ```markdown
 ---
@@ -239,25 +368,11 @@ GOAL: {{goal}}
 {{#if files_in_scope}}FILES: {{files_in_scope}}{{/if}}
 ```
 
-Five built-ins ship by default — including `user-skill-prompt-engineer`,
-the meta-skill the Architect invokes whenever it's about to dispatch to a
-sub-agent. The Skills panel (right pane → Skills) lists everything,
-toggles enable/disable, shows the last turn's selection trace, and lets
-you stub a new user skill from the UI.
+Five built-ins ship by default — including `user-skill-prompt-engineer`, the meta-skill the Architect invokes whenever it's about to dispatch to a sub-agent. The Skills panel (right pane → Skills) lists everything, toggles enable/disable, shows the last turn's selection trace, and lets you stub a new user skill from the UI.
 
-The Architect prompt itself
-(`src-tauri/src/orchestrator/prompt.rs`, v2 — gold-standard
-meta-prompting; v1 archived alongside as `prompt.v1.rs`) drives every
-turn through a deterministic 8-step pipeline: **intent → contract**
-(role / goal / exit_criteria) → **skill selection** → **memory
-grounding** → **decomposition** (Plan-and-Solve / Least-to-Most) →
-**draft** (via `[[user-skill-prompt-engineer]]`) → **self-critique**
-(Self-Refine + Chain-of-Verification) → **dispatch** (parallel where
-independent) → **observe + self-improve** (`create_memory` for new
-patterns). Research citations are at the top of `prompt.rs`.
+The Architect prompt itself (`src-tauri/src/orchestrator/prompt.rs`, v2 — gold-standard meta-prompting; v1 archived alongside as `prompt.v1.rs`) drives every turn through a deterministic 8-step pipeline: **intent → contract** (role / goal / exit_criteria) → **skill selection** → **memory grounding** → **decomposition** (Plan-and-Solve / Least-to-Most) → **draft** (via `[[user-skill-prompt-engineer]]`) → **self-critique** (Self-Refine + Chain-of-Verification) → **dispatch** (parallel where independent) → **observe + self-improve** (`create_memory` for new patterns). Research citations are at the top of `prompt.rs`.
 
-See [`docs/skills.md`](docs/skills.md) for the author guide and
-[`SKILLS_DESIGN.md`](SKILLS_DESIGN.md) for the design.
+See [`docs/skills.md`](docs/skills.md) for the author guide and [`SKILLS_DESIGN.md`](SKILLS_DESIGN.md) for the design.
 
 ```bash
 # unit tests (parser, router, composer, registry)
@@ -267,4 +382,18 @@ cargo test --lib skills::
 cargo test --test skills_integration
 ```
 
+</details>
 
+<br/>
+
+## Acknowledgements
+
+PigIDE integrates third-party software whose licenses are reproduced in `LICENSES/` and summarised in [`NOTICE`](./NOTICE):
+
+- **[Ruflo](https://github.com/ruvnet/ruflo)** (MIT, © 2024-2026 ruvnet) — used as a supervised Node.js sidecar (`pigide-ruflod`) that powers the orchestrator-ledger layer. PigIDE talks to it over its MCP server (transport=stdio); see `src-tauri/src/ruflo/` for the bridge.
+
+<br/>
+
+<div align="center">
+  <sub>© 2026 PigIDE · Tauri · React · Rust · Three.js · <b>local · forever</b></sub>
+</div>

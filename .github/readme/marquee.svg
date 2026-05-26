@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 220" role="img" aria-label="Conduct The Swarm — You Direct — Agents Build">
+  <defs>
+    <linearGradient id="fadeMask" x1="0" x2="1" y1="0" y2="0">
+      <stop offset="0%" stop-color="#000"/>
+      <stop offset="8%" stop-color="#fff"/>
+      <stop offset="92%" stop-color="#fff"/>
+      <stop offset="100%" stop-color="#000"/>
+    </linearGradient>
+    <mask id="fade">
+      <rect width="1600" height="220" fill="url(#fadeMask)"/>
+    </mask>
+  </defs>
+
+  <rect width="1600" height="220" fill="#0a0708"/>
+  <line x1="0" y1="0" x2="1600" y2="0" stroke="#ffffff" stroke-opacity="0.07"/>
+  <line x1="0" y1="220" x2="1600" y2="220" stroke="#ffffff" stroke-opacity="0.07"/>
+
+  <g mask="url(#fade)" font-family="'Syne', 'Inter', sans-serif" font-weight="800" font-size="150" letter-spacing="-7">
+    <g>
+      <animateTransform attributeName="transform" type="translate" from="0 0" to="-2000 0" dur="20s" repeatCount="indefinite"/>
+      <text x="0"    y="160" fill="none" stroke="#ffffff" stroke-opacity="0.35" stroke-width="1.5">CONDUCT</text>
+      <text x="700"  y="160" fill="#ffffff" fill-opacity="0.04">THE<tspan fill="#ff3366" fill-opacity="1">·</tspan>SWARM</text>
+      <text x="1400" y="160" fill="none" stroke="#ffffff" stroke-opacity="0.35" stroke-width="1.5">YOU<tspan fill="#ff3366">·</tspan>DIRECT</text>
+      <text x="2000" y="160" fill="#ffffff" fill-opacity="0.04">AGENTS<tspan fill="#ff3366" fill-opacity="1">·</tspan>BUILD</text>
+
+      <text x="2700" y="160" fill="none" stroke="#ffffff" stroke-opacity="0.35" stroke-width="1.5">CONDUCT</text>
+      <text x="3400" y="160" fill="#ffffff" fill-opacity="0.04">THE<tspan fill="#ff3366" fill-opacity="1">·</tspan>SWARM</text>
+      <text x="4100" y="160" fill="none" stroke="#ffffff" stroke-opacity="0.35" stroke-width="1.5">YOU<tspan fill="#ff3366">·</tspan>DIRECT</text>
+      <text x="4700" y="160" fill="#ffffff" fill-opacity="0.04">AGENTS<tspan fill="#ff3366" fill-opacity="1">·</tspan>BUILD</text>
+    </g>
+  </g>
+</svg>
