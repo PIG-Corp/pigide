@@ -1,0 +1,86 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 600" role="img" aria-label="PigIDE — Intent Into Motion">
+  <defs>
+    <radialGradient id="b1" cx="20%" cy="30%" r="60%">
+      <stop offset="0%" stop-color="#ff3366" stop-opacity="0.55"/>
+      <stop offset="60%" stop-color="#ff3366" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="b2" cx="80%" cy="70%" r="60%">
+      <stop offset="0%" stop-color="#6633ff" stop-opacity="0.5"/>
+      <stop offset="60%" stop-color="#6633ff" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="b3" cx="55%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#00e5ff" stop-opacity="0.35"/>
+      <stop offset="60%" stop-color="#00e5ff" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="line" x1="0" x2="1" y1="0" y2="0">
+      <stop offset="0%" stop-color="#ff3366" stop-opacity="0"/>
+      <stop offset="50%" stop-color="#ff3366" stop-opacity="0.8"/>
+      <stop offset="100%" stop-color="#ff3366" stop-opacity="0"/>
+    </linearGradient>
+    <filter id="grain">
+      <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" seed="3"/>
+      <feColorMatrix values="0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 0.06 0"/>
+      <feComposite in2="SourceGraphic" operator="in"/>
+    </filter>
+  </defs>
+
+  <rect width="1600" height="600" fill="#0a0708"/>
+
+  <g style="mix-blend-mode: screen">
+    <ellipse cx="320" cy="180" rx="520" ry="320" fill="url(#b1)">
+      <animate attributeName="cx" values="320;420;280;320" dur="14s" repeatCount="indefinite"/>
+      <animate attributeName="cy" values="180;240;160;180" dur="14s" repeatCount="indefinite"/>
+    </ellipse>
+    <ellipse cx="1280" cy="420" rx="560" ry="340" fill="url(#b2)">
+      <animate attributeName="cx" values="1280;1180;1320;1280" dur="18s" repeatCount="indefinite"/>
+      <animate attributeName="cy" values="420;380;460;420" dur="18s" repeatCount="indefinite"/>
+    </ellipse>
+    <ellipse cx="800" cy="320" rx="400" ry="260" fill="url(#b3)">
+      <animate attributeName="cx" values="800;860;760;800" dur="22s" repeatCount="indefinite"/>
+    </ellipse>
+  </g>
+
+  <rect width="1600" height="600" fill="#000" filter="url(#grain)" opacity="0.4"/>
+
+  <g font-family="'JetBrains Mono', ui-monospace, monospace" fill="#ffffff" opacity="0.45" font-size="13" letter-spacing="3">
+    <line x1="80" y1="80" x2="160" y2="80" stroke="#ffffff" stroke-opacity="0.45" stroke-width="1"/>
+    <text x="180" y="84">V0.1.0 · DESKTOP IDE FOR SWARM OPERATORS</text>
+  </g>
+
+  <g font-family="'Syne', 'Inter', sans-serif" font-weight="800" font-size="190" letter-spacing="-9" fill="#ffffff">
+    <text x="80" y="290">
+      INTENT
+      <animate attributeName="x" values="80;78;82;80" dur="4s" repeatCount="indefinite"/>
+    </text>
+    <text x="80" y="290" fill="#ff0044" opacity="0">
+      INTENT
+      <animate attributeName="opacity" values="0;0;0.7;0;0" keyTimes="0;0.92;0.94;0.96;1" dur="6s" repeatCount="indefinite"/>
+      <animate attributeName="x" values="80;76;80" keyTimes="0;0.94;1" dur="6s" repeatCount="indefinite"/>
+    </text>
+    <text x="80" y="290" fill="#00f0ff" opacity="0">
+      INTENT
+      <animate attributeName="opacity" values="0;0;0.7;0;0" keyTimes="0;0.92;0.95;0.97;1" dur="6s" repeatCount="indefinite"/>
+      <animate attributeName="x" values="80;84;80" keyTimes="0;0.95;1" dur="6s" repeatCount="indefinite"/>
+    </text>
+
+    <text x="80" y="490">
+      INTO <tspan fill="#ff3366" font-style="italic">MOTION.</tspan>
+    </text>
+    <text x="80" y="490" fill="#ff0044" opacity="0">
+      INTO MOTION.
+      <animate attributeName="opacity" values="0;0;0.6;0;0" keyTimes="0;0.55;0.57;0.59;1" dur="6s" repeatCount="indefinite"/>
+    </text>
+    <text x="80" y="490" fill="#00f0ff" opacity="0">
+      INTO MOTION.
+      <animate attributeName="opacity" values="0;0;0.6;0;0" keyTimes="0;0.56;0.58;0.6;1" dur="6s" repeatCount="indefinite"/>
+    </text>
+  </g>
+
+  <g font-family="'JetBrains Mono', ui-monospace, monospace" font-size="13" fill="#ffffff" opacity="0.5" letter-spacing="1.5">
+    <text x="80" y="540"><tspan fill="#ff3366">→</tspan>  TAURI 2.X · REACT 19  ·  6 AGENT RUNTIMES · 1 CONDUCTOR  ·  SUB-300MS VOICE  ·  LOCAL FOREVER</text>
+  </g>
+
+  <rect x="0" y="598" width="1600" height="2" fill="url(#line)">
+    <animate attributeName="x" values="-1600;1600" dur="6s" repeatCount="indefinite"/>
+  </rect>
+</svg>
