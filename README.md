@@ -1,13 +1,16 @@
 <div align="center">
 
-  <picture>
-    <source srcset=".github/readme/hero.webp" type="image/webp"/>
-    <img src=".github/readme/hero.gif" alt="PigIDE — Intent Into Motion" width="100%"/>
-  </picture>
+  <a href="https://kroch228.github.io/pigide-landing/">
+    <picture>
+      <source srcset=".github/readme/hero.webp" type="image/webp"/>
+      <img src=".github/readme/hero.gif" alt="PigIDE — Intent Into Motion" width="100%"/>
+    </picture>
+  </a>
 
   <br/>
 
-  [![License](https://img.shields.io/badge/license-MIT-0a0708?style=flat-square&labelColor=0a0708&color=ff3366)](LICENSE)
+  [![Live demo](https://img.shields.io/badge/live_demo-kroch228.github.io%2Fpigide--landing-0a0708?style=flat-square&labelColor=0a0708&color=ff3366)](https://kroch228.github.io/pigide-landing/)
+  [![License](https://img.shields.io/badge/license-MIT-0a0708?style=flat-square&labelColor=0a0708&color=ffffff)](LICENSE)
   [![Stack](https://img.shields.io/badge/tauri_2-rust-0a0708?style=flat-square&labelColor=0a0708&color=ffffff)](#stack)
   [![Platform](https://img.shields.io/badge/macOS_·_Linux_·_Windows-0a0708?style=flat-square&labelColor=0a0708&color=ffffff)](#prerequisites)
   [![CoC](https://img.shields.io/badge/contributor_covenant-2.1-0a0708?style=flat-square&labelColor=0a0708&color=ffffff)](CODE_OF_CONDUCT.md)
@@ -16,6 +19,10 @@
 
   **A desktop IDE that hosts a pool of CLI coding agents as tiled terminal panes.**
   <br/>You direct. The swarm builds. Voice in. Code out.
+
+  <br/>
+
+  **→ <a href="https://kroch228.github.io/pigide-landing/">View the live landing page</a>**
 
   <sub>See <a href="docs/superpowers/specs/2026-05-14-pigide-design.md"><code>docs/superpowers/specs/2026-05-14-pigide-design.md</code></a> for the full design.</sub>
 
@@ -396,4 +403,6 @@ PigIDE integrates third-party software whose licenses are reproduced in `LICENSE
 
 <div align="center">
   <sub>© 2026 PigIDE · Tauri · React · Rust · Three.js · <b>local · forever</b></sub>
+  <br/>
+  <sub><a href="https://kroch228.github.io/pigide-landing/">kroch228.github.io/pigide-landing</a></sub>
 </div>
