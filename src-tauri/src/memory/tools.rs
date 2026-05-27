@@ -16,7 +16,12 @@ pub fn tool_definitions() -> Vec<Value> {
                     "body": {"type": "string", "default": ""},
                     "tags": {"type": "array", "items": {"type": "string"}},
                     "aliases": {"type": "array", "items": {"type": "string"}},
-                    "slug": {"type": "string", "description": "Optional slug override."}
+                    "slug": {"type": "string", "description": "Optional slug override."},
+                    "kind": {
+                        "type": "string",
+                        "enum": ["concept", "entity", "source", "task", "chat", "meta"],
+                        "description": "Note kind. Defaults to 'source'. Folder placement follows the kind."
+                    }
                 },
                 "required": ["title"]
             }),
@@ -144,17 +149,13 @@ pub async fn dispatch(
                 })
                 .unwrap_or_default();
             let slug = args.get("slug").and_then(|v| v.as_str()).map(String::from);
+            let kind = args
+                .get("kind")
+                .and_then(|v| v.as_str())
+                .and_then(crate::memory::folders::Kind::parse)
+                .unwrap_or_else(crate::memory::folders::Kind::default_for_legacy);
             let ws_id = current_workspace(db)?;
-            let note = service.create(
-                &ws_id,
-                title,
-                body,
-                tags,
-                aliases,
-                slug,
-                crate::memory::folders::Kind::default_for_legacy(),
-                None,
-            )?;
+            let note = service.create(&ws_id, title, body, tags, aliases, slug, kind, None)?;
             Ok(json!(note))
         }
         "read_memory" => {

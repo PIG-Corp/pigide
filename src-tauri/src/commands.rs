@@ -1078,6 +1078,8 @@ pub struct CreateMemoryArgs {
     pub aliases: Vec<String>,
     #[serde(default)]
     pub slug: Option<String>,
+    #[serde(default)]
+    pub kind: Option<String>,
 }
 
 #[tauri::command]
@@ -1085,6 +1087,11 @@ pub async fn create_memory(
     state: State<'_, AppState>,
     args: CreateMemoryArgs,
 ) -> std::result::Result<Note, String> {
+    let kind = args
+        .kind
+        .as_deref()
+        .and_then(crate::memory::folders::Kind::parse)
+        .unwrap_or_else(crate::memory::folders::Kind::default_for_legacy);
     state
         .memory
         .create(
@@ -1094,7 +1101,7 @@ pub async fn create_memory(
             args.tags,
             args.aliases,
             args.slug,
-            crate::memory::folders::Kind::default_for_legacy(),
+            kind,
             None,
         )
         .map_err(Into::into)
