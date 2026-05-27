@@ -126,7 +126,11 @@ impl Orchestrator {
         let workspaces = self.ws_mgr.list().unwrap_or_default();
         s.push_str(&format!(
             "current_workspace_id: {}\n",
-            if current_id.is_empty() { "(none)" } else { &current_id }
+            if current_id.is_empty() {
+                "(none)"
+            } else {
+                &current_id
+            }
         ));
         s.push_str("workspaces:\n");
         if workspaces.is_empty() {
@@ -191,19 +195,30 @@ impl Orchestrator {
         if !on {
             return None;
         }
+        let mut out = String::new();
+        // 1. Hot cache (recently-touched concepts/entities/tasks). This is
+        //    the "session preamble" that survives across restarts — the
+        //    smart-lane refreshes it after every pass.
+        if let Some(hot) = crate::memory::ingest::hot::read_body(&self.memory, workspace_id) {
+            out.push_str("\n\n[MEMORY HOT — recent working set]\n");
+            out.push_str(&hot);
+        }
+        // 2. FTS hits keyed off the user's latest message.
         let hits = self.memory.search(workspace_id, user_text, 3).ok()?;
         let hits: Vec<_> = hits.into_iter().filter(|h| h.score >= 0.1).collect();
-        if hits.is_empty() {
-            return None;
+        if !hits.is_empty() {
+            out.push_str("\n\n[MEMORY CONTEXT — top relevant notes]\n");
+            for h in &hits {
+                out.push_str(&format!(
+                    "- [[{}]] (score {:.2}): {}\n",
+                    h.slug,
+                    h.score,
+                    h.snippet.replace('\n', " ")
+                ));
+            }
         }
-        let mut out = String::from("\n\n[MEMORY CONTEXT — top relevant notes]\n");
-        for h in &hits {
-            out.push_str(&format!(
-                "- [[{}]] (score {:.2}): {}\n",
-                h.slug,
-                h.score,
-                h.snippet.replace('\n', " ")
-            ));
+        if out.is_empty() {
+            return None;
         }
         out.push_str("Use [[wikilinks]] to reference these in your reply.\n");
         Some(out)
@@ -278,7 +293,11 @@ impl Orchestrator {
                     let summary = if names.is_empty() {
                         String::new()
                     } else {
-                        format!("[emitted {} tool call(s): {}]", names.len(), names.join(", "))
+                        format!(
+                            "[emitted {} tool call(s): {}]",
+                            names.len(),
+                            names.join(", ")
+                        )
                     };
                     let text = match (cleaned.is_empty(), summary.is_empty()) {
                         (true, true) => String::new(),
@@ -388,15 +407,11 @@ impl Orchestrator {
             let app = self.app.read().clone();
             let id_for_cb = placeholder_id.clone();
             let req = self.build_request(provider, messages, tools.to_vec());
-            let (delta_tx, mut delta_rx) =
-                tokio::sync::mpsc::unbounded_channel::<String>();
+            let (delta_tx, mut delta_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
             let forwarder = tokio::spawn(async move {
                 while let Some(delta) = delta_rx.recv().await {
                     if let Some(app) = &app {
-                        let _ = app.emit(
-                            EV_CHAT_CHUNK,
-                            json!({ "id": id_for_cb, "delta": delta }),
-                        );
+                        let _ = app.emit(EV_CHAT_CHUNK, json!({ "id": id_for_cb, "delta": delta }));
                     }
                 }
             });
@@ -673,12 +688,7 @@ impl Orchestrator {
 
         let char_budget = cfg.token_budget.saturating_mul(4);
         let res = compose_system_prompt(sys, &ordered, &ctx, char_budget);
-        let _ = crate::skills::trace::record(
-            &self.db,
-            session_id,
-            &routed,
-            res.composed_chars,
-        );
+        let _ = crate::skills::trace::record(&self.db, session_id, &routed, res.composed_chars);
         res.prompt
     }
 }

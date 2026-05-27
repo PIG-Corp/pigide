@@ -121,6 +121,9 @@ impl SmartIngestWorker {
         self.apply_parsed(workspace_id, &pending, &parsed)?;
         let ids: Vec<i64> = pending.iter().map(|p| p.id).collect();
         mark_processed(&self.db, &ids)?;
+        // Refresh the hot cache so the next chat session opens with the
+        // up-to-date working set in its system prompt.
+        let _ = super::hot::rebuild(&self.memory, workspace_id);
         Ok(())
     }
 
