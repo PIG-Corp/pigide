@@ -7,6 +7,7 @@
 
 pub mod folders;
 pub mod links;
+pub mod migration;
 pub mod note;
 pub mod service;
 pub mod storage;
