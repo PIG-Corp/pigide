@@ -166,6 +166,50 @@ impl MemoryService {
         Ok(note)
     }
 
+    /// Append a `## Section\n\n<body>` block to an existing note. If the
+    /// exact heading + body pair is already present, the call is a no-op.
+    /// Used by the smart-lane's "edits" channel.
+    pub fn append_section(&self, note_id: &str, heading: &str, body: &str) -> Result<Note> {
+        let mut note = self.get(note_id)?;
+        let trimmed_heading = heading.trim_start();
+        let trimmed_body = body.trim();
+        // Idempotency: heading + first body line already present → no-op.
+        let block_marker = format!("\n{}\n", trimmed_heading);
+        if note.body.contains(&block_marker)
+            && note
+                .body
+                .contains(trimmed_body.lines().next().unwrap_or(""))
+        {
+            return Ok(note);
+        }
+        let mut new_body = String::from(note.body.trim_end());
+        if !new_body.is_empty() {
+            new_body.push_str("\n\n");
+        }
+        new_body.push_str(trimmed_heading);
+        new_body.push_str("\n\n");
+        new_body.push_str(trimmed_body);
+        new_body.push('\n');
+        note.body = new_body;
+        note.updated_at = chrono::Utc::now().to_rfc3339();
+        let conn = self.db.get()?;
+        let (root_str, path_str): (String, String) = conn.query_row(
+            "SELECT workspace_root, path FROM memory_notes WHERE id=?1",
+            [note_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )?;
+        drop(conn);
+        let path = crate::files::validate_workspace_write_path(
+            &path_str,
+            &[std::path::PathBuf::from(&root_str)],
+        )?;
+        let raw = note::serialize(&note);
+        note::write(&path, &raw)?;
+        self.upsert_index(&root_str, &path, &note)?;
+        self.rebuild_links(&note)?;
+        Ok(note)
+    }
+
     fn unique_slug(&self, root_str: &str, base: String) -> Result<String> {
         let conn = self.db.get()?;
         let mut stmt =
@@ -823,6 +867,58 @@ mod tests {
         assert_eq!(n2.body, "second body");
         assert_eq!(n2.tags, vec!["auth".to_string(), "refactor".to_string()]);
         assert_eq!(n2.slug, "tasks/abc-123");
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn append_section_appends_when_absent() {
+        let (svc, ws_id, dir) = fresh_service();
+        let n = svc
+            .upsert_by_slug(
+                &ws_id,
+                "tasks/abc",
+                "Task ABC",
+                "## Summary\n\noriginal body\n",
+                vec![],
+                Kind::Task,
+                None,
+            )
+            .unwrap();
+        let updated = svc
+            .append_section(&n.id, "## Concepts referenced", "- [[idempotent-upsert]]")
+            .unwrap();
+        assert!(updated.body.contains("## Summary"));
+        assert!(updated.body.contains("## Concepts referenced"));
+        assert!(updated.body.contains("[[idempotent-upsert]]"));
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn append_section_is_idempotent() {
+        let (svc, ws_id, dir) = fresh_service();
+        let n = svc
+            .upsert_by_slug(
+                &ws_id,
+                "tasks/abc",
+                "Task ABC",
+                "## Summary\n\noriginal body\n",
+                vec![],
+                Kind::Task,
+                None,
+            )
+            .unwrap();
+        let _ = svc
+            .append_section(&n.id, "## Concepts referenced", "- [[x]]")
+            .unwrap();
+        let twice = svc
+            .append_section(&n.id, "## Concepts referenced", "- [[x]]")
+            .unwrap();
+        // Section appears exactly once.
+        assert_eq!(
+            twice.body.matches("## Concepts referenced").count(),
+            1,
+            "duplicate section after second append"
+        );
         std::fs::remove_dir_all(dir).ok();
     }
 }
