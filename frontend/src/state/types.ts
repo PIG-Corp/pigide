@@ -299,3 +299,13 @@ export interface SshPreset {
   created_at: string;
   updated_at: string;
 }
+
+// ---------- PigMemory ingest events ----------
+
+export interface MemoryNoteCreated {
+  id: string;
+  slug: string;
+  title: string;
+  kind: NoteKind;
+  source_kind: "task_complete" | "chat_chunk";
+}
