@@ -20,6 +20,7 @@ pub struct AppState {
     pub voice: Arc<VoicePipeline>,
     pub task_mgr: Arc<TaskManager>,
     pub memory: Arc<MemoryService>,
+    pub chat_buffer: Arc<crate::memory::ingest::chat_chunk::ChatBuffer>,
     pub mcp: Arc<McpServerHandle>,
     pub skills: Arc<SkillRegistry>,
     pub architect: Arc<Architect>,

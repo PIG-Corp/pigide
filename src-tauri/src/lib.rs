@@ -136,6 +136,7 @@ pub fn run() {
     let ws_mgr = Arc::new(WorkspaceManager::new(pool.clone()));
     let task_mgr = Arc::new(TaskManager::new(pool.clone()));
     let memory = Arc::new(MemoryService::new(pool.clone(), ws_mgr.clone()));
+    let chat_buffer = Arc::new(crate::memory::ingest::chat_chunk::ChatBuffer::new());
     if let Err(e) = crate::memory::migration::run_once(&pool) {
         tracing::warn!("memory phase0 disk migration failed: {}", e);
     }
@@ -203,6 +204,7 @@ pub fn run() {
         voice: voice.clone(),
         task_mgr: task_mgr.clone(),
         memory: memory.clone(),
+        chat_buffer: chat_buffer.clone(),
         mcp: Arc::new(McpServerHandle::default()),
         skills: skills.clone(),
         architect: architect.clone(),

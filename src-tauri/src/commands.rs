@@ -1034,9 +1034,25 @@ pub async fn list_tasks(
 #[tauri::command]
 pub async fn update_task(
     state: State<'_, AppState>,
+    app: tauri::AppHandle,
     args: UpdateTaskArgs,
 ) -> std::result::Result<Task, String> {
-    state.task_mgr.update(args).map_err(Into::into)
+    let want_complete = matches!(args.status.as_deref(), Some("complete"));
+    let task = state
+        .task_mgr
+        .update(args)
+        .map_err::<String, _>(Into::into)?;
+    if want_complete && task.status == "complete" {
+        crate::memory::ingest::task_complete::on_task_complete(
+            state.memory.clone(),
+            state.task_mgr.clone(),
+            state.db.clone(),
+            Some(app),
+            task.workspace_id.clone(),
+            task.id.clone(),
+        );
+    }
+    Ok(task)
 }
 
 #[tauri::command]
