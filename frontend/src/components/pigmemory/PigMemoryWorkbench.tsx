@@ -30,6 +30,7 @@ import { NoteList, type NoteListHandle } from "./NoteList";
 import { PigMemoryEditor } from "./PigMemoryEditor";
 import { MarkdownPreview } from "./MarkdownPreview";
 import { PigMemoryGraph, type PigMemoryGraphHandle } from "./PigMemoryGraph";
+import { ActivityTimeline, type ActivityEvent } from "./ActivityTimeline";
 import { TagManager } from "./TagManager";
 import { aggregateTags } from "./wikilink";
 
@@ -225,6 +226,9 @@ export function PigMemoryWorkbench() {
   // (for dimming) and the sidebar list (for filtering rows).
   const [kindFilter, setKindFilter] = useState<Set<string> | null>(null);
 
+  // Activity log for the bottom timeline strip (last 4h, capped at 200).
+  const [activity, setActivity] = useState<ActivityEvent[]>([]);
+
   useEffect(() => {
     let unlisten: (() => void) | null = null;
     let cancelled = false;
@@ -235,6 +239,22 @@ export function PigMemoryWorkbench() {
         setRecentNodeIds((prev) => {
           const next = new Set(prev);
           next.add(evt.id);
+          return next;
+        });
+        // Append to activity log (capped at 200, oldest dropped).
+        setActivity((prev) => {
+          const next: ActivityEvent[] = [
+            ...prev,
+            {
+              id: evt.id,
+              slug: evt.slug,
+              title: evt.title,
+              kind: evt.kind,
+              source_kind: evt.source_kind,
+              at: Date.now(),
+            },
+          ];
+          if (next.length > 200) next.splice(0, next.length - 200);
           return next;
         });
         // Auto-clear after 3s.
@@ -583,6 +603,13 @@ export function PigMemoryWorkbench() {
             searchTerm={s.searchDeb}
             recentNodeIds={recentNodeIds}
             kindFilter={kindFilter}
+          />
+          <ActivityTimeline
+            events={activity}
+            onFocus={(id) => {
+              dispatch({ type: "graphTab", v: false });
+              openNote(id);
+            }}
           />
         </div>
       ) : (

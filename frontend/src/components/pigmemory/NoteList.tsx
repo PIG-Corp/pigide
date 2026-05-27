@@ -15,6 +15,7 @@ interface ItemRow {
   id: string;
   slug: string;
   title: string;
+  kind?: import("../../state/types").NoteKind;
   tags?: string[];
   snippet?: string;
   updatedAt?: string;
@@ -136,7 +137,16 @@ export const NoteList = forwardRef<
                 height: ROW_HEIGHT,
               }}
             >
-              <div className="pigmem-row-title">{it.title || it.slug}</div>
+              <div className="pigmem-row-title">
+                {it.kind ? (
+                  <span
+                    className={`pigmem-row-kind-dot pigmem-row-kind-dot--${it.kind}`}
+                    aria-label={`${it.kind} note`}
+                    title={it.kind}
+                  />
+                ) : null}
+                {it.title || it.slug}
+              </div>
               {showSnippet && it.snippet ? (
                 <div
                   className="pigmem-row-snippet"

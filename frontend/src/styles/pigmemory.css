@@ -374,6 +374,128 @@
   color: var(--fg);
 }
 
+/* Kind dot — leading colour swatch in NoteList rows. Tiny but enough
+   to teach the palette by repetition. */
+.pigmem-row-kind-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  margin-right: 8px;
+  vertical-align: middle;
+  background: var(--fg-muted);
+  flex-shrink: 0;
+}
+.pigmem-row-kind-dot--concept { background: var(--accent); }
+.pigmem-row-kind-dot--entity  { background: var(--info); }
+.pigmem-row-kind-dot--source  { background: var(--success); }
+.pigmem-row-kind-dot--task    { background: var(--warn); }
+.pigmem-row-kind-dot--chat    { background: var(--fg-muted); }
+.pigmem-row-kind-dot--meta    { background: var(--accent-soft); border: 1px solid var(--accent); }
+
+/* Activity timeline — bottom strip under the full-canvas graph. Plots
+   the last 4h of memory://note.created events. */
+.pigmem-activity {
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  background: var(--bg-raised);
+  border-top: var(--pigmem-rail);
+  padding: 8px 16px 6px;
+  font-size: 10px;
+  color: var(--fg-muted);
+  user-select: none;
+}
+.pigmem-activity--empty {
+  padding: 12px 16px;
+  font-style: italic;
+  color: var(--fg-subtle);
+}
+.pigmem-activity-track {
+  position: relative;
+  flex: 1;
+  height: 36px;
+  border-bottom: 1px dashed var(--border);
+}
+.pigmem-activity-tick {
+  position: absolute;
+  bottom: 0;
+  width: 1px;
+  height: 6px;
+  background: var(--border);
+}
+.pigmem-activity-tick-label {
+  position: absolute;
+  bottom: -14px;
+  transform: translateX(-50%);
+  font-variant-numeric: tabular-nums;
+  color: var(--fg-subtle);
+}
+.pigmem-activity-dot {
+  position: absolute;
+  top: 12px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 0;
+  margin-left: -4px;
+  background: var(--fg-muted);
+  cursor: pointer;
+  transition: transform var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out);
+  padding: 0;
+}
+.pigmem-activity-dot:hover,
+.pigmem-activity-dot.is-hover {
+  transform: scale(1.6);
+  box-shadow: 0 0 0 3px var(--bg);
+}
+.pigmem-activity-dot--concept { background: var(--accent); }
+.pigmem-activity-dot--entity  { background: var(--info); }
+.pigmem-activity-dot--source  { background: var(--success); }
+.pigmem-activity-dot--task    { background: var(--warn); }
+.pigmem-activity-dot--chat    { background: var(--fg-muted); }
+.pigmem-activity-dot--meta    { background: var(--accent); border: 1px solid var(--accent-strong); }
+.pigmem-activity-tooltip {
+  position: absolute;
+  bottom: 30px;
+  transform: translateX(-50%);
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-3);
+  padding: 6px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  white-space: nowrap;
+  z-index: 10;
+  pointer-events: none;
+}
+.pigmem-activity-tooltip-kind {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.pigmem-activity-tooltip-title {
+  font-size: 12px;
+  color: var(--fg);
+}
+.pigmem-activity-tooltip-slug {
+  font-size: 10px;
+  color: var(--fg-subtle);
+  font-family: var(--font-mono);
+}
+.pigmem-activity-counts {
+  position: absolute;
+  right: 16px;
+  bottom: 6px;
+  font-variant-numeric: tabular-nums;
+  color: var(--fg-subtle);
+}
+
 /* ── Note list (virtualised) ──────────────────────────── */
 .pigmem-list {
   flex: 1;
