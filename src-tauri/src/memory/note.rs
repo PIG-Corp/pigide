@@ -1,9 +1,22 @@
 //! Note model + YAML frontmatter (de)serialization.
 
 use crate::error::{Error, Result};
+use crate::memory::folders::Kind;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+
+/// Where this note came from. `None` for user-created notes; `Some(...)`
+/// for anything written by the ingest pipeline.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct IngestRecord {
+    pub source_kind: String,
+    #[serde(default)]
+    pub source_ref: Option<String>,
+    pub ingested_at: String,
+    #[serde(default)]
+    pub smart_pass_at: Option<String>,
+}
 
 /// In-memory representation of a note. The `path` field is workspace-relative
 /// (or absolute, depending on caller); the frontmatter holds the canonical id.
@@ -12,6 +25,8 @@ pub struct Note {
     pub id: String,
     pub slug: String,
     pub title: String,
+    #[serde(default = "Kind::default_for_legacy")]
+    pub kind: Kind,
     #[serde(default)]
     pub tags: Vec<String>,
     #[serde(default)]
@@ -19,6 +34,8 @@ pub struct Note {
     pub body: String,
     pub created_at: String,
     pub updated_at: String,
+    #[serde(default)]
+    pub ingest: Option<IngestRecord>,
 }
 
 impl Note {
@@ -28,11 +45,13 @@ impl Note {
             id: Uuid::new_v4().to_string(),
             slug,
             title,
+            kind: Kind::default_for_legacy(),
             tags: Vec::new(),
             aliases: Vec::new(),
             body,
             created_at: ts.clone(),
             updated_at: ts,
+            ingest: None,
         }
     }
 }
@@ -60,6 +79,7 @@ pub fn serialize(note: &Note) -> String {
     out.push_str("---\n");
     out.push_str(&format!("id: {}\n", note.id));
     out.push_str(&format!("title: {}\n", yaml_escape(&note.title)));
+    out.push_str(&format!("kind: {}\n", note.kind.as_str()));
     if !note.tags.is_empty() {
         out.push_str(&format!("tags: [{}]\n", note.tags.join(", ")));
     }
@@ -75,6 +95,17 @@ pub fn serialize(note: &Note) -> String {
     }
     out.push_str(&format!("created_at: {}\n", note.created_at));
     out.push_str(&format!("updated_at: {}\n", note.updated_at));
+    if let Some(ing) = &note.ingest {
+        out.push_str("ingest:\n");
+        out.push_str(&format!("  source_kind: {}\n", ing.source_kind));
+        if let Some(r) = &ing.source_ref {
+            out.push_str(&format!("  source_ref: {}\n", yaml_escape(r)));
+        }
+        out.push_str(&format!("  ingested_at: {}\n", ing.ingested_at));
+        if let Some(s) = &ing.smart_pass_at {
+            out.push_str(&format!("  smart_pass_at: {}\n", s));
+        }
+    }
     out.push_str("---\n");
     out.push_str(&note.body);
     if !note.body.ends_with('\n') {
@@ -99,16 +130,58 @@ pub fn parse(slug: &str, raw: &str) -> Result<Note> {
 }
 
 fn parse_frontmatter(slug: &str, fm: &str, body: &str) -> Result<Note> {
-    // We use a hand-rolled tiny YAML reader for the small set of keys we
-    // care about. This avoids pulling a full YAML lib for a 6-key header.
+    // Hand-rolled tiny YAML reader, extended to recognise a one-level
+    // nested `ingest:` block of the form
+    //
+    //   ingest:
+    //     source_kind: task
+    //     source_ref: abc-123
+    //     ingested_at: 2026-...
+    //     smart_pass_at: 2026-...
     let mut id = String::new();
     let mut title = String::new();
+    let mut kind = Kind::default_for_legacy();
     let mut tags = Vec::new();
     let mut aliases = Vec::new();
     let mut created_at = String::new();
     let mut updated_at = String::new();
+    let mut in_ingest = false;
+    let mut ing_source_kind = String::new();
+    let mut ing_source_ref: Option<String> = None;
+    let mut ing_ingested_at = String::new();
+    let mut ing_smart_pass_at: Option<String> = None;
+    let mut ingest_seen = false;
     for raw_line in fm.lines() {
         let line = raw_line.trim_end();
+        if line.is_empty() {
+            continue;
+        }
+        let starts_indented = line.starts_with("  ") || line.starts_with('\t');
+        if in_ingest && starts_indented {
+            let trimmed = line.trim_start();
+            let (k, v) = match trimmed.split_once(':') {
+                Some(x) => x,
+                None => continue,
+            };
+            let val = v.trim();
+            match k.trim() {
+                "source_kind" => ing_source_kind = yaml_unescape(val),
+                "source_ref" => {
+                    if !val.is_empty() {
+                        ing_source_ref = Some(yaml_unescape(val));
+                    }
+                }
+                "ingested_at" => ing_ingested_at = val.to_string(),
+                "smart_pass_at" => {
+                    if !val.is_empty() {
+                        ing_smart_pass_at = Some(val.to_string());
+                    }
+                }
+                _ => {}
+            }
+            continue;
+        }
+        in_ingest = false;
         let (k, v) = match line.split_once(':') {
             Some(x) => x,
             None => continue,
@@ -118,6 +191,11 @@ fn parse_frontmatter(slug: &str, fm: &str, body: &str) -> Result<Note> {
         match key {
             "id" => id = val.to_string(),
             "title" => title = yaml_unescape(val),
+            "kind" => {
+                if let Some(parsed) = Kind::parse(val) {
+                    kind = parsed;
+                }
+            }
             "tags" => tags = parse_inline_list(val),
             "aliases" => {
                 aliases = parse_inline_list(val)
@@ -127,6 +205,10 @@ fn parse_frontmatter(slug: &str, fm: &str, body: &str) -> Result<Note> {
             }
             "created_at" => created_at = val.to_string(),
             "updated_at" => updated_at = val.to_string(),
+            "ingest" => {
+                in_ingest = true;
+                ingest_seen = true;
+            }
             _ => {}
         }
     }
@@ -136,10 +218,25 @@ fn parse_frontmatter(slug: &str, fm: &str, body: &str) -> Result<Note> {
         id
     };
     let now = Utc::now().to_rfc3339();
+    let ingest = if ingest_seen && !ing_source_kind.is_empty() {
+        Some(IngestRecord {
+            source_kind: ing_source_kind,
+            source_ref: ing_source_ref,
+            ingested_at: if ing_ingested_at.is_empty() {
+                now.clone()
+            } else {
+                ing_ingested_at
+            },
+            smart_pass_at: ing_smart_pass_at,
+        })
+    } else {
+        None
+    };
     Ok(Note {
         id,
         slug: slug.to_string(),
         title,
+        kind,
         tags,
         aliases,
         body: body.to_string(),
@@ -153,6 +250,7 @@ fn parse_frontmatter(slug: &str, fm: &str, body: &str) -> Result<Note> {
         } else {
             updated_at
         },
+        ingest,
     })
 }
 
@@ -272,5 +370,57 @@ mod tests {
         let n = parse("orphan", "Just text.\n").unwrap();
         assert_eq!(n.title, "orphan");
         assert_eq!(n.body, "Just text.\n");
+    }
+
+    #[test]
+    fn round_trip_preserves_kind_and_ingest() {
+        let mut n = Note::new(
+            "tasks/abc-123".into(),
+            "Task ABC".into(),
+            "did the thing\n".into(),
+        );
+        n.kind = crate::memory::folders::Kind::Task;
+        n.ingest = Some(IngestRecord {
+            source_kind: "task".into(),
+            source_ref: Some("abc-123".into()),
+            ingested_at: "2026-05-27T15:00:00Z".into(),
+            smart_pass_at: None,
+        });
+        let raw = serialize(&n);
+        assert!(raw.contains("kind: task"));
+        assert!(raw.contains("ingest:"));
+        assert!(raw.contains("source_kind: task"));
+        let parsed = parse("tasks/abc-123", &raw).unwrap();
+        assert_eq!(parsed.kind, crate::memory::folders::Kind::Task);
+        let ing = parsed.ingest.expect("ingest preserved");
+        assert_eq!(ing.source_kind, "task");
+        assert_eq!(ing.source_ref.as_deref(), Some("abc-123"));
+        assert!(ing.smart_pass_at.is_none());
+    }
+
+    #[test]
+    fn legacy_note_without_kind_defaults_to_source() {
+        let raw = "---\nid: 11111111-1111-1111-1111-111111111111\ntitle: Old\ncreated_at: 2025-01-01T00:00:00Z\nupdated_at: 2025-01-01T00:00:00Z\n---\nbody\n";
+        let n = parse("old-flat", raw).unwrap();
+        assert_eq!(n.kind, crate::memory::folders::Kind::Source);
+        assert!(n.ingest.is_none());
+    }
+
+    #[test]
+    fn smart_pass_at_round_trips_when_set() {
+        let mut n = Note::new("concepts/x".into(), "X".into(), "".into());
+        n.kind = crate::memory::folders::Kind::Concept;
+        n.ingest = Some(IngestRecord {
+            source_kind: "task_complete".into(),
+            source_ref: Some("t-1".into()),
+            ingested_at: "2026-05-27T15:00:00Z".into(),
+            smart_pass_at: Some("2026-05-27T15:05:00Z".into()),
+        });
+        let raw = serialize(&n);
+        let parsed = parse("concepts/x", &raw).unwrap();
+        assert_eq!(
+            parsed.ingest.unwrap().smart_pass_at.as_deref(),
+            Some("2026-05-27T15:05:00Z")
+        );
     }
 }

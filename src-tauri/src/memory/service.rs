@@ -225,11 +225,15 @@ impl MemoryService {
             id: row.get(0)?,
             slug: row.get(1)?,
             title: row.get(2)?,
+            // TODO(phase-0/task-4+5): read kind + ingest from DB once the
+            // columns exist. Bridge keeps the workspace compiling.
+            kind: crate::memory::folders::Kind::default_for_legacy(),
             tags: serde_json::from_str(&tags_json).unwrap_or_default(),
             aliases: serde_json::from_str(&aliases_json).unwrap_or_default(),
             body: row.get(5)?,
             created_at: row.get(6)?,
             updated_at: row.get(7)?,
+            ingest: None,
         })
     }
 
