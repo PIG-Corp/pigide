@@ -137,6 +137,12 @@ pub fn run() {
     let task_mgr = Arc::new(TaskManager::new(pool.clone()));
     let memory = Arc::new(MemoryService::new(pool.clone(), ws_mgr.clone()));
     let chat_buffer = Arc::new(crate::memory::ingest::chat_chunk::ChatBuffer::new());
+    let smart_worker = Arc::new(crate::memory::ingest::smart::SmartIngestWorker::new(
+        pool.clone(),
+        memory.clone(),
+        ws_mgr.clone(),
+    ));
+    smart_worker.clone().start();
     if let Err(e) = crate::memory::migration::run_once(&pool) {
         tracing::warn!("memory phase0 disk migration failed: {}", e);
     }
