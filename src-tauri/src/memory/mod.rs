@@ -5,6 +5,7 @@
 //! `/` for nested folders. Each note carries a YAML frontmatter with a stable
 //! `id` (uuid v4) — the path/slug is secondary so renames don't break links.
 
+pub mod folders;
 pub mod links;
 pub mod note;
 pub mod service;
