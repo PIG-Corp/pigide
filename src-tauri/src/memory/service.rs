@@ -43,6 +43,7 @@ pub struct GraphNode {
     pub id: String,
     pub slug: String,
     pub title: String,
+    pub kind: crate::memory::folders::Kind,
     pub tags: Vec<String>,
 }
 
@@ -85,18 +86,24 @@ impl MemoryService {
         tags: Vec<String>,
         aliases: Vec<String>,
         slug_override: Option<String>,
+        kind: crate::memory::folders::Kind,
+        ingest: Option<crate::memory::note::IngestRecord>,
     ) -> Result<Note> {
         if title.trim().is_empty() {
             return Err(Error::Invalid("title required".into()));
         }
         let root = self.root_for(workspace_id)?;
-        let slug = self.unique_slug(
-            &root.to_string_lossy(),
-            slug_override.unwrap_or_else(|| storage::slugify(title)),
-        )?;
+        let raw_slug = slug_override.unwrap_or_else(|| {
+            // Default: prefix with the kind's folder so new notes from
+            // ingest land in the right place automatically.
+            format!("{}/{}", kind.folder(), storage::slugify(title))
+        });
+        let slug = self.unique_slug(&root.to_string_lossy(), raw_slug)?;
         let mut note = Note::new(slug.clone(), title.to_string(), body.to_string());
+        note.kind = kind;
         note.tags = tags;
         note.aliases = aliases;
+        note.ingest = ingest;
         let path = storage::slug_to_path(&root, &slug)?;
         let raw = note::serialize(&note);
         note::write(&path, &raw)?;
@@ -133,25 +140,32 @@ impl MemoryService {
             .unwrap_or(0);
         let tags_json = serde_json::to_string(&note.tags)?;
         let aliases_json = serde_json::to_string(&note.aliases)?;
+        let ingest_json = match &note.ingest {
+            Some(i) => Some(serde_json::to_string(i)?),
+            None => None,
+        };
         let conn = self.db.get()?;
         conn.execute(
-            "INSERT INTO memory_notes(id,workspace_root,slug,title,path,tags_json,aliases_json,body,mtime,created_at,updated_at)
-             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)
+            "INSERT INTO memory_notes(id,workspace_root,slug,title,kind,path,tags_json,aliases_json,body,mtime,created_at,updated_at,ingest_json)
+             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)
              ON CONFLICT(id) DO UPDATE SET
                 workspace_root=excluded.workspace_root,
                 slug=excluded.slug,
                 title=excluded.title,
+                kind=excluded.kind,
                 path=excluded.path,
                 tags_json=excluded.tags_json,
                 aliases_json=excluded.aliases_json,
                 body=excluded.body,
                 mtime=excluded.mtime,
-                updated_at=excluded.updated_at",
+                updated_at=excluded.updated_at,
+                ingest_json=excluded.ingest_json",
             rusqlite::params![
                 &note.id,
                 root_str,
                 &note.slug,
                 &note.title,
+                note.kind.as_str(),
                 &path.to_string_lossy(),
                 &tags_json,
                 &aliases_json,
@@ -159,6 +173,7 @@ impl MemoryService {
                 mtime,
                 &note.created_at,
                 &note.updated_at,
+                &ingest_json,
             ],
         )?;
         Ok(())
@@ -212,28 +227,29 @@ impl MemoryService {
     pub fn get(&self, id: &str) -> Result<Note> {
         let conn = self.db.get()?;
         let mut stmt = conn.prepare(
-            "SELECT id,slug,title,tags_json,aliases_json,body,created_at,updated_at
+            "SELECT id,slug,title,kind,tags_json,aliases_json,body,created_at,updated_at,ingest_json
              FROM memory_notes WHERE id=?1",
         )?;
         let mut rows = stmt.query([id])?;
         let row = rows
             .next()?
             .ok_or_else(|| Error::NotFound(format!("note {}", id)))?;
-        let tags_json: String = row.get(3)?;
-        let aliases_json: String = row.get(4)?;
+        let kind_str: String = row.get(3)?;
+        let tags_json: String = row.get(4)?;
+        let aliases_json: String = row.get(5)?;
+        let ingest_json: Option<String> = row.get(9)?;
         Ok(Note {
             id: row.get(0)?,
             slug: row.get(1)?,
             title: row.get(2)?,
-            // TODO(phase-0/task-4+5): read kind + ingest from DB once the
-            // columns exist. Bridge keeps the workspace compiling.
-            kind: crate::memory::folders::Kind::default_for_legacy(),
+            kind: crate::memory::folders::Kind::parse(&kind_str)
+                .unwrap_or_else(crate::memory::folders::Kind::default_for_legacy),
             tags: serde_json::from_str(&tags_json).unwrap_or_default(),
             aliases: serde_json::from_str(&aliases_json).unwrap_or_default(),
-            body: row.get(5)?,
-            created_at: row.get(6)?,
-            updated_at: row.get(7)?,
-            ingest: None,
+            body: row.get(6)?,
+            created_at: row.get(7)?,
+            updated_at: row.get(8)?,
+            ingest: ingest_json.and_then(|s| serde_json::from_str(&s).ok()),
         })
     }
 
@@ -468,15 +484,18 @@ impl MemoryService {
         let root_str = root.to_string_lossy().to_string();
         let conn = self.db.get()?;
         let mut stmt_n = conn.prepare(
-            "SELECT id, slug, title, tags_json FROM memory_notes WHERE workspace_root=?1",
+            "SELECT id, slug, title, kind, tags_json FROM memory_notes WHERE workspace_root=?1",
         )?;
         let nodes: Vec<GraphNode> = stmt_n
             .query_map([&root_str], |r| {
-                let tags_json: String = r.get(3)?;
+                let kind_str: String = r.get(3)?;
+                let tags_json: String = r.get(4)?;
                 Ok(GraphNode {
                     id: r.get(0)?,
                     slug: r.get(1)?,
                     title: r.get(2)?,
+                    kind: crate::memory::folders::Kind::parse(&kind_str)
+                        .unwrap_or_else(crate::memory::folders::Kind::default_for_legacy),
                     tags: serde_json::from_str(&tags_json).unwrap_or_default(),
                 })
             })?
@@ -668,5 +687,50 @@ mod tests {
     fn sanitize_preserves_underscores() {
         let q = sanitize_fts_query("my_func other_thing");
         assert_eq!(q, "my_func OR other_thing");
+    }
+
+    use crate::memory::folders::Kind;
+    use crate::workspace::WorkspaceManager;
+
+    fn fresh_service() -> (MemoryService, String, std::path::PathBuf) {
+        let dir = std::env::temp_dir().join(format!("pigide-memsvc-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let manager = r2d2_sqlite::SqliteConnectionManager::memory();
+        let pool = r2d2::Pool::builder().max_size(1).build(manager).unwrap();
+        {
+            let conn = pool.get().unwrap();
+            crate::db::migrate_one(&conn).expect("migrate in-mem db");
+        }
+        let ws_mgr = std::sync::Arc::new(WorkspaceManager::new(pool.clone()));
+        let ws = ws_mgr
+            .create("phase0", vec![dir.to_string_lossy().to_string()])
+            .expect("create ws");
+        let svc = MemoryService::new(pool, ws_mgr);
+        (svc, ws.id, dir)
+    }
+
+    #[test]
+    fn create_carries_kind_and_graph_exposes_it() {
+        let (svc, ws_id, dir) = fresh_service();
+        let n = svc
+            .create(
+                &ws_id,
+                "Task ABC",
+                "did the thing",
+                vec!["auth".into()],
+                vec![],
+                Some("tasks/abc-123".into()),
+                Kind::Task,
+                None,
+            )
+            .unwrap();
+        assert_eq!(n.kind, Kind::Task);
+        assert_eq!(n.slug, "tasks/abc-123");
+        let got = svc.get(&n.id).unwrap();
+        assert_eq!(got.kind, Kind::Task);
+        let g = svc.graph(&ws_id).unwrap();
+        let node = g.nodes.iter().find(|x| x.id == n.id).unwrap();
+        assert_eq!(node.kind, Kind::Task);
+        std::fs::remove_dir_all(dir).ok();
     }
 }

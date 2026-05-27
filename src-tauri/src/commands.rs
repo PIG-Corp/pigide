@@ -165,7 +165,11 @@ pub async fn spawn_agent(
     for _ in 0..count {
         let a = state
             .agent_mgr
-            .spawn(&args.workspace_id, agent_type.clone(), effective_cwd.clone())
+            .spawn(
+                &args.workspace_id,
+                agent_type.clone(),
+                effective_cwd.clone(),
+            )
             .map_err(Into::<String>::into)?;
         if auto_layout {
             ws.layout = std::mem::take(&mut ws.layout).insert_grid(&a.id, 0);
@@ -1090,6 +1094,8 @@ pub async fn create_memory(
             args.tags,
             args.aliases,
             args.slug,
+            crate::memory::folders::Kind::default_for_legacy(),
+            None,
         )
         .map_err(Into::into)
 }

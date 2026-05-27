@@ -41,11 +41,11 @@ pub fn init_pool() -> Result<DbPool> {
 }
 
 /// Idempotent schema migration on a single connection.
-fn migrate_one(conn: &rusqlite::Connection) -> Result<()> {
+pub(crate) fn migrate_one(conn: &rusqlite::Connection) -> Result<()> {
     let current: i64 = conn
         .query_row("PRAGMA user_version;", [], |r| r.get(0))
         .unwrap_or(0);
-    let target = 15;
+    let target = 16;
     if current >= target {
         return Ok(());
     }
@@ -499,6 +499,19 @@ fn migrate_one(conn: &rusqlite::Connection) -> Result<()> {
                  REFERENCES workspaces(id) ON DELETE CASCADE;
              CREATE INDEX IF NOT EXISTS idx_chat_sessions_ws
                 ON chat_sessions(workspace_id);
+             COMMIT;",
+        )?;
+    }
+    if current < 16 {
+        // PigMemory Phase 0: add `kind` and `ingest_json` columns to
+        // memory_notes. Existing rows get kind='source' so legacy notes
+        // are still findable. ingest_json defaults NULL (only set for
+        // notes written by the ingest pipeline).
+        conn.execute_batch(
+            "BEGIN;
+             ALTER TABLE memory_notes ADD COLUMN kind TEXT NOT NULL DEFAULT 'source';
+             ALTER TABLE memory_notes ADD COLUMN ingest_json TEXT;
+             CREATE INDEX IF NOT EXISTS idx_notes_kind ON memory_notes(workspace_root, kind);
              COMMIT;",
         )?;
     }

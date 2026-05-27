@@ -145,7 +145,16 @@ pub async fn dispatch(
                 .unwrap_or_default();
             let slug = args.get("slug").and_then(|v| v.as_str()).map(String::from);
             let ws_id = current_workspace(db)?;
-            let note = service.create(&ws_id, title, body, tags, aliases, slug)?;
+            let note = service.create(
+                &ws_id,
+                title,
+                body,
+                tags,
+                aliases,
+                slug,
+                crate::memory::folders::Kind::default_for_legacy(),
+                None,
+            )?;
             Ok(json!(note))
         }
         "read_memory" => {
