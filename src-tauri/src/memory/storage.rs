@@ -40,18 +40,26 @@ pub fn slug_to_path(root: &Path, slug: &str) -> Result<PathBuf> {
             slug
         )));
     }
+    if let Some(parent) = p.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
     Ok(p)
 }
 
 fn validate_slug(slug: &str) -> Result<()> {
-    if slug.is_empty()
-        || slug == "."
-        || slug.contains("..")
-        || slug.contains('/')
-        || slug.contains('\\')
-        || slug.contains('\0')
-    {
+    if slug.is_empty() || slug == "." {
         return Err(Error::Invalid(format!("invalid memory slug: {}", slug)));
+    }
+    if slug.starts_with('/') || slug.ends_with('/') {
+        return Err(Error::Invalid(format!("invalid memory slug: {}", slug)));
+    }
+    if slug.contains('\\') || slug.contains('\0') || slug.contains("//") {
+        return Err(Error::Invalid(format!("invalid memory slug: {}", slug)));
+    }
+    for segment in slug.split('/') {
+        if segment.is_empty() || segment == "." || segment == ".." {
+            return Err(Error::Invalid(format!("invalid memory slug: {}", slug)));
+        }
     }
     Ok(())
 }
@@ -87,19 +95,40 @@ mod tests {
     }
 
     #[test]
-    fn slug_rejects_traversal() {
-        let root = tempdir_for_test("pigide-memory-traversal");
-        let err = slug_to_path(&root, "../../etc/cron.d/backdoor").unwrap_err();
-        assert!(err.to_string().contains("invalid memory slug"));
+    fn slug_accepts_single_level_nesting() {
+        let root = tempdir_for_test("pigide-memory-nest");
+        let p = slug_to_path(&root, "tasks/abc-123").unwrap();
+        assert_eq!(p, root.join("tasks").join("abc-123.md"));
+        let back = path_to_slug(&root, &p).unwrap();
+        assert_eq!(back, "tasks/abc-123");
         std::fs::remove_dir_all(root).ok();
     }
 
     #[test]
-    fn slug_rejects_path_separators_and_dot_segments() {
-        let root = tempdir_for_test("pigide-memory-separators");
-        assert!(slug_to_path(&root, "nested/hidden").is_err());
-        assert!(slug_to_path(&root, r"nested\hidden").is_err());
+    fn slug_accepts_two_level_nesting() {
+        let root = tempdir_for_test("pigide-memory-nest2");
+        let p = slug_to_path(&root, "chats/claude-tile-1/2026-05-27").unwrap();
+        assert_eq!(
+            p,
+            root.join("chats")
+                .join("claude-tile-1")
+                .join("2026-05-27.md")
+        );
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn slug_rejects_traversal_and_bad_chars() {
+        let root = tempdir_for_test("pigide-memory-bad");
+        assert!(slug_to_path(&root, "../etc/passwd").is_err());
+        assert!(slug_to_path(&root, "tasks/../etc").is_err());
+        assert!(slug_to_path(&root, "tasks//double").is_err());
+        assert!(slug_to_path(&root, "/abs").is_err());
+        assert!(slug_to_path(&root, "trailing/").is_err());
+        assert!(slug_to_path(&root, r"with\backslash").is_err());
+        assert!(slug_to_path(&root, "with\0null").is_err());
         assert!(slug_to_path(&root, ".").is_err());
+        assert!(slug_to_path(&root, "").is_err());
         std::fs::remove_dir_all(root).ok();
     }
 
