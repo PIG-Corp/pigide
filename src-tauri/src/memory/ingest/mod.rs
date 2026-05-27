@@ -12,4 +12,5 @@ pub mod chat_chunk;
 pub mod events;
 pub mod prompt;
 pub mod queue;
+pub mod smart;
 pub mod task_complete;
