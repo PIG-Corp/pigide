@@ -6,6 +6,7 @@
 //! `id` (uuid v4) — the path/slug is secondary so renames don't break links.
 
 pub mod folders;
+pub mod ingest;
 pub mod links;
 pub mod migration;
 pub mod note;

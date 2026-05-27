@@ -18,3 +18,6 @@ pub const EV_CHAT_SCOPE: &str = "chat://scope";
 pub const EV_VOICE_STATE: &str = "voice://state";
 pub const EV_VOICE_TRANSCRIPT: &str = "voice://transcript";
 pub const EV_VOICE_DOWNLOAD: &str = "voice://download";
+/// PigMemory ingest emitted a new (or updated) note. Payload:
+/// `NoteCreatedPayload { id, slug, title, kind, source_kind }`.
+pub const EV_MEMORY_NOTE_CREATED: &str = "memory://note.created";
