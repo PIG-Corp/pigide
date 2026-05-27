@@ -40,6 +40,7 @@ interface VisibleRow {
   id: string;
   slug: string;
   title: string;
+  kind?: import("../../state/types").NoteKind;
   tags?: string[];
   snippet?: string;
   updatedAt?: string;
@@ -219,6 +220,10 @@ export function PigMemoryWorkbench() {
   // so the graph can paint a glow halo + a brief pulse animation.
   const [recentNodeIds, setRecentNodeIds] = useState<Set<string>>(new Set());
   const recentTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+
+  // Kind filter — null = "all". Same Set instance is passed to the graph
+  // (for dimming) and the sidebar list (for filtering rows).
+  const [kindFilter, setKindFilter] = useState<Set<string> | null>(null);
 
   useEffect(() => {
     let unlisten: (() => void) | null = null;
@@ -419,6 +424,7 @@ export function PigMemoryWorkbench() {
         id: h.id,
         slug: h.slug,
         title: h.title,
+        kind: byId.get(h.id)?.kind,
         snippet: h.snippet,
         tags: byId.get(h.id)?.tags,
         updatedAt: byId.get(h.id)?.updated_at,
@@ -428,12 +434,16 @@ export function PigMemoryWorkbench() {
         id: n.id,
         slug: n.slug,
         title: n.title,
+        kind: n.kind,
         tags: n.tags,
         updatedAt: n.updated_at,
       }));
     }
     if (s.tagFilter) {
       rows = rows.filter((r) => r.tags?.includes(s.tagFilter!));
+    }
+    if (kindFilter && kindFilter.size > 0) {
+      rows = rows.filter((r) => r.kind && kindFilter.has(r.kind));
     }
     if (!s.hits) {
       rows = rows.slice().sort((a, b) => {
@@ -447,7 +457,7 @@ export function PigMemoryWorkbench() {
       });
     }
     return rows;
-  }, [s.hits, s.list, s.tagFilter, s.sort]);
+  }, [s.hits, s.list, s.tagFilter, s.sort, kindFilter]);
 
   // Cmd/Ctrl+S anywhere inside the workbench triggers save.
   useEffect(() => {
@@ -572,6 +582,7 @@ export function PigMemoryWorkbench() {
             }}
             searchTerm={s.searchDeb}
             recentNodeIds={recentNodeIds}
+            kindFilter={kindFilter}
           />
         </div>
       ) : (
@@ -585,6 +596,8 @@ export function PigMemoryWorkbench() {
               onCreate={createNote}
               tags={allTags}
               visible={visible}
+              kindFilter={kindFilter}
+              setKindFilter={setKindFilter}
             />
           </Allotment.Pane>
           <Allotment.Pane minSize={360}>
@@ -646,6 +659,8 @@ function Sidebar({
   onCreate,
   tags,
   visible,
+  kindFilter,
+  setKindFilter,
 }: {
   s: State;
   listRef: React.MutableRefObject<NoteListHandle | null>;
@@ -654,6 +669,8 @@ function Sidebar({
   onCreate: () => void;
   tags: { tag: string; count: number }[];
   visible: VisibleRow[];
+  kindFilter: Set<string> | null;
+  setKindFilter: React.Dispatch<React.SetStateAction<Set<string> | null>>;
 }) {
   return (
     <div className="pigmem-sidebar">
@@ -681,6 +698,36 @@ function Sidebar({
             <X size={10} />
           </button>
         ) : null}
+      </div>
+
+      <div className="pigmem-sidebar-kinds" role="toolbar" aria-label="Kind filter">
+        {(["all", "concept", "entity", "task", "chat", "source"] as const).map((k) => {
+          const isAll = k === "all";
+          const active = isAll
+            ? !kindFilter || kindFilter.size === 0
+            : kindFilter?.has(k) ?? false;
+          return (
+            <button
+              key={k}
+              className={`pigmem-kind-chip pigmem-kind-chip--${k} ${active ? "is-active" : ""}`}
+              onClick={() => {
+                if (isAll) {
+                  setKindFilter(null);
+                } else {
+                  setKindFilter((prev) => {
+                    const next = new Set(prev ?? []);
+                    if (next.has(k)) next.delete(k);
+                    else next.add(k);
+                    return next.size === 0 ? null : next;
+                  });
+                }
+              }}
+              title={isAll ? "Show all kinds" : `Filter to ${k}s`}
+            >
+              {k}
+            </button>
+          );
+        })}
       </div>
 
       {tags.length > 0 ? (

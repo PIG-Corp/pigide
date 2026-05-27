@@ -317,6 +317,63 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* Kind filter — segmented chip row above the tag chips. Each chip is
+   coloured by its kind so the user learns the palette by looking at the
+   filter and recognising the same colours in the graph. */
+.pigmem-sidebar-kinds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-5);
+  border-bottom: var(--pigmem-rail);
+}
+.pigmem-kind-chip {
+  display: inline-flex;
+  align-items: center;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--fg-muted);
+  border-radius: var(--radius-pill);
+  padding: 2px 9px;
+  font-size: 10px;
+  font-weight: 600;
+  font-family: inherit;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+}
+.pigmem-kind-chip:hover {
+  border-color: var(--border-strong);
+  color: var(--fg);
+}
+.pigmem-kind-chip.is-active {
+  background: var(--bg-raised);
+  border-color: currentColor;
+}
+.pigmem-kind-chip--all.is-active {
+  color: var(--fg);
+  background: var(--hover-strong);
+  border-color: var(--border-strong);
+}
+.pigmem-kind-chip--concept.is-active {
+  color: var(--accent);
+}
+.pigmem-kind-chip--entity.is-active {
+  color: var(--info);
+}
+.pigmem-kind-chip--source.is-active {
+  color: var(--success);
+}
+.pigmem-kind-chip--task.is-active {
+  color: var(--warn);
+}
+.pigmem-kind-chip--chat.is-active {
+  color: var(--fg);
+}
+
 /* ── Note list (virtualised) ──────────────────────────── */
 .pigmem-list {
   flex: 1;

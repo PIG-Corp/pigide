@@ -122,7 +122,7 @@ export interface NoteSummary {
   id: string;
   slug: string;
   title: string;
-  kind?: NoteKind;
+  kind: NoteKind;
   tags: string[];
   updated_at: string;
 }

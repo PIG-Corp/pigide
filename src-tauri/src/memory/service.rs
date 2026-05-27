@@ -17,6 +17,7 @@ pub struct NoteSummary {
     pub id: String,
     pub slug: String,
     pub title: String,
+    pub kind: crate::memory::folders::Kind,
     pub tags: Vec<String>,
     pub updated_at: String,
 }
@@ -422,21 +423,24 @@ impl MemoryService {
         let root_str = root.to_string_lossy().to_string();
         let conn = self.db.get()?;
         let mut stmt = conn.prepare(
-            "SELECT id, slug, title, tags_json, updated_at
+            "SELECT id, slug, title, kind, tags_json, updated_at
              FROM memory_notes
              WHERE workspace_root=?1
              ORDER BY updated_at DESC
              LIMIT ?2",
         )?;
         let rows = stmt.query_map(rusqlite::params![&root_str, limit.clamp(1, 500)], |r| {
-            let tags_json: String = r.get(3)?;
+            let kind_str: String = r.get(3)?;
+            let tags_json: String = r.get(4)?;
             let tags: Vec<String> = serde_json::from_str(&tags_json).unwrap_or_default();
             Ok(NoteSummary {
                 id: r.get(0)?,
                 slug: r.get(1)?,
                 title: r.get(2)?,
+                kind: crate::memory::folders::Kind::parse(&kind_str)
+                    .unwrap_or_else(crate::memory::folders::Kind::default_for_legacy),
                 tags,
-                updated_at: r.get(4)?,
+                updated_at: r.get(5)?,
             })
         })?;
         let mut out = Vec::new();
