@@ -1039,6 +1039,23 @@ function Inspector({
           Open in full graph →
         </button>
       </Section>
+      <Section title="Smart-lane">
+        <button
+          className="pigmem-inspector-graph-launch"
+          onClick={async () => {
+            if (!state.activeId) return;
+            try {
+              await ipc.memoryReingestNote(state.activeId);
+            } catch {
+              // Errors swallowed — user can re-trigger.
+            }
+          }}
+          disabled={!state.activeId}
+          title="Queue this note for the smart-lane on the next tick"
+        >
+          Re-run smart pass on this note
+        </button>
+      </Section>
     </div>
   );
 }
