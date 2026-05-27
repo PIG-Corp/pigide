@@ -223,6 +223,7 @@ pub fn run() {
         .setup(move |app| {
             // Hand AppHandle to managers that emit events.
             agent_mgr.set_app_handle(app.handle().clone());
+            agent_mgr.set_ingest_handles(memory.clone(), chat_buffer.clone());
             orchestrator.set_app_handle(app.handle().clone());
             voice.set_app_handle(app.handle().clone());
             architect.set_app_handle(app.handle().clone());

@@ -177,6 +177,11 @@ pub struct AgentManager {
     /// re-spawn it on reconnect (broker death + revive is a future
     /// concern; for now a hard failure ends the session).
     pump_started: AtomicBool,
+    /// PigMemory fast-lane handles, set once both objects exist (lib.rs
+    /// boot ordering). The PTY pump uses these to buffer chat output
+    /// and flush on threshold / agent exit.
+    ingest_memory: Mutex<Option<Arc<crate::memory::MemoryService>>>,
+    ingest_buffer: Mutex<Option<Arc<crate::memory::ingest::chat_chunk::ChatBuffer>>>,
 }
 
 impl AgentManager {
@@ -189,11 +194,24 @@ impl AgentManager {
             socket_path: Mutex::new(default_socket_path()),
             connect_lock: AsyncMutex::new(()),
             pump_started: AtomicBool::new(false),
+            ingest_memory: Mutex::new(None),
+            ingest_buffer: Mutex::new(None),
         }
     }
 
     pub fn set_app_handle(&self, app: AppHandle) {
         *self.app.lock() = Some(app);
+    }
+
+    /// Wire the PigMemory fast-lane handles. Called once at startup from
+    /// `lib.rs` after both `MemoryService` and `ChatBuffer` exist.
+    pub fn set_ingest_handles(
+        &self,
+        memory: Arc<crate::memory::MemoryService>,
+        buffer: Arc<crate::memory::ingest::chat_chunk::ChatBuffer>,
+    ) {
+        *self.ingest_memory.lock() = Some(memory);
+        *self.ingest_buffer.lock() = Some(buffer);
     }
 
     /// Override the broker socket path. Tests use this to avoid the
@@ -278,9 +296,7 @@ impl AgentManager {
     /// otherwise the broker spawns fresh under that id.
     pub fn respawn_persisted(self: &Arc<Self>, agent_id: &str) -> Result<bool> {
         let conn = self.db.get()?;
-        let mut stmt = conn.prepare(
-            "SELECT id,workspace_id,type,cwd FROM agents WHERE id=?1",
-        )?;
+        let mut stmt = conn.prepare("SELECT id,workspace_id,type,cwd FROM agents WHERE id=?1")?;
         let mut rows = stmt.query([agent_id])?;
         let row = match rows.next()? {
             Some(r) => r,
@@ -319,8 +335,7 @@ impl AgentManager {
         let live = {
             let state = self.connected.lock();
             let client = state.as_ref().expect("connected").client.clone();
-            block_on_safely(async move { client.list_all().await })
-                .map_err(client_to_error)?
+            block_on_safely(async move { client.list_all().await }).map_err(client_to_error)?
         };
 
         let conn = self.db.get()?;
@@ -343,10 +358,8 @@ impl AgentManager {
                  WHERE status='running' AND id NOT IN ({})",
                 placeholders
             );
-            let params: Vec<&dyn rusqlite::ToSql> = live_ids
-                .iter()
-                .map(|s| s as &dyn rusqlite::ToSql)
-                .collect();
+            let params: Vec<&dyn rusqlite::ToSql> =
+                live_ids.iter().map(|s| s as &dyn rusqlite::ToSql).collect();
             conn.execute(&sql, &*params)?;
         }
         // UPSERT broker's view of every live agent.
@@ -363,6 +376,13 @@ impl AgentManager {
             )?;
         }
         drop(conn);
+
+        // Register restored agents with the chat-buffer so flushes resolve.
+        if let Some(buf) = self.ingest_buffer.lock().clone() {
+            for a in &live {
+                buf.register_agent(&a.id, &a.workspace_id, &a.agent_type);
+            }
+        }
 
         // Tell the frontend.
         if let Some(app) = self.app.lock().as_ref() {
@@ -419,8 +439,8 @@ impl AgentManager {
             let state = self.connected.lock();
             state.as_ref().expect("connected").client.clone()
         };
-        let info = block_on_safely(async move { client.spawn(args).await })
-            .map_err(client_to_error)?;
+        let info =
+            block_on_safely(async move { client.spawn(args).await }).map_err(client_to_error)?;
 
         // UPSERT mirror.
         let conn = self.db.get()?;
@@ -444,6 +464,9 @@ impl AgentManager {
         drop(conn);
 
         let agent: Agent = info.into();
+        if let Some(buf) = self.ingest_buffer.lock().clone() {
+            buf.register_agent(&agent.id, &agent.workspace_id, &agent.agent_type);
+        }
         if let Some(app) = self.app.lock().as_ref() {
             let _ = app.emit(EV_AGENT_SPAWNED, &agent);
         }
@@ -480,8 +503,7 @@ impl AgentManager {
     pub fn kill(&self, agent_id: &str) -> Result<()> {
         let client = self.client_or_err()?;
         let id = agent_id.to_string();
-        block_on_safely(async move { client.kill(&id).await })
-            .map_err(client_to_error)?;
+        block_on_safely(async move { client.kill(&id).await }).map_err(client_to_error)?;
         let conn = self.db.get()?;
         conn.execute("UPDATE agents SET status='exited' WHERE id=?1", [agent_id])?;
         Ok(())
@@ -531,9 +553,7 @@ impl AgentManager {
     /// Old call sites (`RunEvent::ExitRequested`, `WindowEvent::Destroyed`)
     /// keep calling it; we just log.
     pub fn kill_all(&self) {
-        tracing::info!(
-            "kill_all: no-op (broker holds the PTYs; agents survive PigIDE quit)"
-        );
+        tracing::info!("kill_all: no-op (broker holds the PTYs; agents survive PigIDE quit)");
     }
 
     // --- internals ---
@@ -604,6 +624,8 @@ impl AgentManager {
         }
         let app = self.app.lock().clone();
         let db = self.db.clone();
+        let ingest_memory = self.ingest_memory.lock().clone();
+        let ingest_buffer = self.ingest_buffer.lock().clone();
         tauri::async_runtime::spawn(async move {
             loop {
                 match events.recv().await {
@@ -618,6 +640,25 @@ impl AgentManager {
                                 }),
                             );
                         }
+                        // Fast-lane chat ingest: buffer per-agent stdout, flush
+                        // on threshold or agent exit. No-op when handles aren't
+                        // set (early startup or fast-lane disabled).
+                        if let (Some(mem), Some(buf)) =
+                            (ingest_memory.clone(), ingest_buffer.clone())
+                        {
+                            let app_for_ingest = app.clone();
+                            let db_for_ingest = db.clone();
+                            tauri::async_runtime::spawn(async move {
+                                crate::memory::ingest::chat_chunk::on_pty_stdout(
+                                    mem,
+                                    db_for_ingest,
+                                    app_for_ingest,
+                                    buf,
+                                    agent_id,
+                                    data_b64,
+                                );
+                            });
+                        }
                     }
                     Ok(Event::Exit { agent_id }) => {
                         if let Ok(c) = db.get() {
@@ -627,10 +668,24 @@ impl AgentManager {
                             );
                         }
                         if let Some(app) = &app {
-                            let _ = app.emit(
-                                EV_AGENT_EXIT,
-                                serde_json::json!({ "agent_id": agent_id }),
-                            );
+                            let _ = app
+                                .emit(EV_AGENT_EXIT, serde_json::json!({ "agent_id": agent_id }));
+                        }
+                        // Final flush for the agent — anything still in the
+                        // buffer becomes the last chunk of its day.
+                        if let (Some(mem), Some(buf)) =
+                            (ingest_memory.clone(), ingest_buffer.clone())
+                        {
+                            let app_for_flush = app.clone();
+                            let aid = agent_id.clone();
+                            tauri::async_runtime::spawn(async move {
+                                crate::memory::ingest::chat_chunk::flush_now(
+                                    mem,
+                                    app_for_flush,
+                                    buf,
+                                    &aid,
+                                );
+                            });
                         }
                     }
                     Ok(Event::BrokerShutdown { reason }) => {
