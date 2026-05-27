@@ -112,6 +112,60 @@ impl MemoryService {
         Ok(note)
     }
 
+    /// Idempotent fast-lane write: if a note with this exact slug already
+    /// exists in the workspace, update it in-place; otherwise create a new
+    /// one. Used by the ingest pipeline where slugs are deterministic
+    /// (e.g. `tasks/<task-id>`).
+    pub fn upsert_by_slug(
+        &self,
+        workspace_id: &str,
+        slug: &str,
+        title: &str,
+        body: &str,
+        tags: Vec<String>,
+        kind: crate::memory::folders::Kind,
+        ingest: Option<crate::memory::note::IngestRecord>,
+    ) -> Result<Note> {
+        let root = self.root_for(workspace_id)?;
+        let root_str = root.to_string_lossy().to_string();
+        let conn = self.db.get()?;
+        let existing_id: Option<String> = conn
+            .query_row(
+                "SELECT id FROM memory_notes WHERE workspace_root=?1 AND slug=?2",
+                rusqlite::params![&root_str, slug],
+                |r| r.get(0),
+            )
+            .ok();
+        drop(conn);
+        if let Some(id) = existing_id {
+            let mut note = self.get(&id)?;
+            note.title = title.to_string();
+            note.body = body.to_string();
+            note.tags = tags;
+            note.kind = kind;
+            note.ingest = ingest;
+            note.updated_at = chrono::Utc::now().to_rfc3339();
+            let path = storage::slug_to_path(&root, &note.slug)?;
+            let raw = note::serialize(&note);
+            note::write(&path, &raw)?;
+            self.upsert_index(&root_str, &path, &note)?;
+            self.rebuild_links(&note)?;
+            return Ok(note);
+        }
+        // Fresh insert: bypass `create` so we keep the caller-provided slug
+        // exactly (no folder-prefix synthesis, no `-2` suffixing).
+        let mut note = Note::new(slug.to_string(), title.to_string(), body.to_string());
+        note.kind = kind;
+        note.tags = tags;
+        note.ingest = ingest;
+        let path = storage::slug_to_path(&root, slug)?;
+        let raw = note::serialize(&note);
+        note::write(&path, &raw)?;
+        self.upsert_index(&root_str, &path, &note)?;
+        self.rebuild_links(&note)?;
+        Ok(note)
+    }
+
     fn unique_slug(&self, root_str: &str, base: String) -> Result<String> {
         let conn = self.db.get()?;
         let mut stmt =
@@ -731,6 +785,44 @@ mod tests {
         let g = svc.graph(&ws_id).unwrap();
         let node = g.nodes.iter().find(|x| x.id == n.id).unwrap();
         assert_eq!(node.kind, Kind::Task);
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn upsert_by_slug_overwrites_when_slug_exists() {
+        let (svc, ws_id, dir) = fresh_service();
+        let n1 = svc
+            .upsert_by_slug(
+                &ws_id,
+                "tasks/abc-123",
+                "Task ABC",
+                "first body",
+                vec!["auth".into()],
+                Kind::Task,
+                Some(crate::memory::note::IngestRecord {
+                    source_kind: "task_complete".into(),
+                    source_ref: Some("abc-123".into()),
+                    ingested_at: "2026-05-27T15:00:00Z".into(),
+                    smart_pass_at: None,
+                }),
+            )
+            .unwrap();
+        let n2 = svc
+            .upsert_by_slug(
+                &ws_id,
+                "tasks/abc-123",
+                "Task ABC v2",
+                "second body",
+                vec!["auth".into(), "refactor".into()],
+                Kind::Task,
+                None,
+            )
+            .unwrap();
+        assert_eq!(n1.id, n2.id);
+        assert_eq!(n2.title, "Task ABC v2");
+        assert_eq!(n2.body, "second body");
+        assert_eq!(n2.tags, vec!["auth".to_string(), "refactor".to_string()]);
+        assert_eq!(n2.slug, "tasks/abc-123");
         std::fs::remove_dir_all(dir).ok();
     }
 }
