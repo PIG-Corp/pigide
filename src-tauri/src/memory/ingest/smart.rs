@@ -2,14 +2,12 @@
 //! sends batches to Haiku 4.5, applies returned upserts/edits.
 
 use crate::db::DbPool;
-use crate::error::{Error, Result};
+use crate::error::Result;
 use crate::memory::folders::Kind;
 use crate::memory::ingest::prompt::{
     build_messages, parse_response, BatchItem, Edit, ExistingSlug, ParsedBatch, Upsert,
 };
-use crate::memory::ingest::queue::{
-    self, mark_error, mark_processed, pending_for_workspace, QueueItem,
-};
+use crate::memory::ingest::queue::{mark_error, mark_processed, pending_for_workspace, QueueItem};
 use crate::memory::note::IngestRecord;
 use crate::memory::MemoryService;
 use crate::orchestrator::client::OmniClient;
@@ -328,6 +326,7 @@ impl SmartIngestWorker {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::memory::ingest::queue;
     use r2d2_sqlite::SqliteConnectionManager;
 
     fn fresh_worker() -> (Arc<SmartIngestWorker>, String, std::path::PathBuf, DbPool) {
