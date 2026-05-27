@@ -46,9 +46,21 @@ export const PigMemoryGraph = forwardRef<
     activeId: string | null;
     onSelect: (id: string) => void;
     searchTerm?: string;
+    /**
+     * Set of node IDs that just received an ingest event in the last few
+     * seconds. Painted with a glow halo + a brief radial scale pulse so
+     * the user sees the graph come alive as work happens. Pass an empty
+     * Set when nothing recent.
+     */
+    recentNodeIds?: Set<string>;
+    /**
+     * Optional kind filter — when set, nodes whose `kind` is not in the
+     * set are dimmed so the user can focus on (e.g.) just concepts.
+     */
+    kindFilter?: Set<string> | null;
   }
 >(function PigMemoryGraph(
-  { data, activeId, onSelect, searchTerm },
+  { data, activeId, onSelect, searchTerm, recentNodeIds, kindFilter },
   ref,
 ) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -175,6 +187,31 @@ export const PigMemoryGraph = forwardRef<
   const colorWarn = (styles?.getPropertyValue("--warn") ?? "#E89A4A").trim() || "#E89A4A";
   const colorFg = (styles?.getPropertyValue("--fg") ?? "#E4E6EA").trim() || "#E4E6EA";
   const colorInfo = (styles?.getPropertyValue("--info") ?? "#60A5FA").trim() || "#60A5FA";
+  const colorSuccess = (styles?.getPropertyValue("--success") ?? "#4ADE80").trim() || "#4ADE80";
+  const colorAccentSoft = (styles?.getPropertyValue("--accent-soft") ?? "rgba(232,154,74,0.16)").trim() || "rgba(232,154,74,0.16)";
+
+  // kind → fill colour. Concept = idea (accent/orange), entity = concrete
+  // (info/blue), source = curated (success/green), task = in-flight
+  // (warn/amber), chat = low-signal (muted/grey), meta = hot.md/pins
+  // (accent-soft).
+  const kindFill = (kind?: string): string => {
+    switch (kind) {
+      case "concept":
+        return colorAccent;
+      case "entity":
+        return colorInfo;
+      case "source":
+        return colorSuccess;
+      case "task":
+        return colorWarn;
+      case "chat":
+        return colorMuted;
+      case "meta":
+        return colorAccentSoft;
+      default:
+        return colorMuted;
+    }
+  };
 
   const search = (searchTerm ?? "").trim().toLowerCase();
 
@@ -227,10 +264,26 @@ export const PigMemoryGraph = forwardRef<
               search.length > 0 &&
               (node.title.toLowerCase().includes(search) ||
                 node.slug.toLowerCase().includes(search));
-            const dim = (egoMode && !inEgo) || (search.length > 0 && !matchesSearch);
+            const isRecent = recentNodeIds?.has(node.id) ?? false;
+            const matchesKind =
+              !kindFilter ||
+              kindFilter.size === 0 ||
+              (node.kind ? kindFilter.has(node.kind) : false);
+            const dim =
+              (egoMode && !inEgo) ||
+              (search.length > 0 && !matchesSearch) ||
+              !matchesKind;
             const r = isActive ? baseR + 2 : baseR;
             const cx = node.x ?? 0;
             const cy = node.y ?? 0;
+
+            // Pulse halo for nodes that just got an ingest event.
+            if (isRecent) {
+              ctx.beginPath();
+              ctx.arc(cx, cy, r + 8, 0, 2 * Math.PI);
+              ctx.fillStyle = colorAccent + "55";
+              ctx.fill();
+            }
 
             // Halo for active / matched nodes.
             if (isActive || matchesSearch) {
@@ -250,7 +303,7 @@ export const PigMemoryGraph = forwardRef<
             } else if (matchesSearch) {
               ctx.fillStyle = colorInfo;
             } else {
-              ctx.fillStyle = colorMuted;
+              ctx.fillStyle = kindFill(node.kind);
             }
             ctx.fill();
 

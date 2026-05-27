@@ -7,9 +7,10 @@ import {
   useMemo,
   useReducer,
   useRef,
+  useState,
 } from "react";
 import { Allotment } from "allotment";
-import { ipc } from "../../state/ipc";
+import { ipc, onMemoryNoteCreated } from "../../state/ipc";
 import { useStore } from "../../state/store";
 import type {
   Backlink,
@@ -212,6 +213,55 @@ export function PigMemoryWorkbench() {
     reloadList();
     reloadGraph();
   }, [reloadList, reloadGraph]);
+
+  // ----- Live ingest events -----------------------------------------------
+  // Track node IDs that just received a memory://note.created event for ~3s
+  // so the graph can paint a glow halo + a brief pulse animation.
+  const [recentNodeIds, setRecentNodeIds] = useState<Set<string>>(new Set());
+  const recentTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    let cancelled = false;
+    (async () => {
+      const off = await onMemoryNoteCreated((evt) => {
+        if (cancelled) return;
+        // Mark recent.
+        setRecentNodeIds((prev) => {
+          const next = new Set(prev);
+          next.add(evt.id);
+          return next;
+        });
+        // Auto-clear after 3s.
+        const existing = recentTimersRef.current.get(evt.id);
+        if (existing) clearTimeout(existing);
+        const t = setTimeout(() => {
+          setRecentNodeIds((prev) => {
+            if (!prev.has(evt.id)) return prev;
+            const next = new Set(prev);
+            next.delete(evt.id);
+            return next;
+          });
+          recentTimersRef.current.delete(evt.id);
+        }, 3000);
+        recentTimersRef.current.set(evt.id, t);
+        // Refresh graph + list so the new node appears.
+        reloadGraph();
+        reloadList();
+      });
+      if (cancelled) {
+        off();
+      } else {
+        unlisten = off;
+      }
+    })();
+    return () => {
+      cancelled = true;
+      if (unlisten) unlisten();
+      for (const t of recentTimersRef.current.values()) clearTimeout(t);
+      recentTimersRef.current.clear();
+    };
+  }, [reloadGraph, reloadList]);
 
   // ----- Debounced search -------------------------------------------------
   useEffect(() => {
@@ -521,6 +571,7 @@ export function PigMemoryWorkbench() {
               openNote(id);
             }}
             searchTerm={s.searchDeb}
+            recentNodeIds={recentNodeIds}
           />
         </div>
       ) : (

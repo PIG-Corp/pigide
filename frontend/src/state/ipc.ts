@@ -548,3 +548,13 @@ export function onDeepLink(cb: (e: DeepLinkEvent) => void): Promise<UnlistenFn> 
   return listen<DeepLinkEvent>("deep-link://nav", (e) => cb(e.payload));
 }
 
+// ---------- PigMemory ingest events ----------
+
+export type MemoryNoteCreatedEvent = import("./types").MemoryNoteCreated;
+
+export function onMemoryNoteCreated(
+  cb: (e: MemoryNoteCreatedEvent) => void,
+): Promise<UnlistenFn> {
+  return listen<MemoryNoteCreatedEvent>("memory://note.created", (e) => cb(e.payload));
+}
+
