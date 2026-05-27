@@ -109,19 +109,37 @@ export interface Note {
   id: string;
   slug: string;
   title: string;
+  kind: NoteKind;
   tags: string[];
   aliases: string[];
   body: string;
   created_at: string;
   updated_at: string;
+  ingest?: IngestRecord;
 }
 
 export interface NoteSummary {
   id: string;
   slug: string;
   title: string;
+  kind?: NoteKind;
   tags: string[];
   updated_at: string;
+}
+
+export type NoteKind =
+  | "concept"
+  | "entity"
+  | "source"
+  | "task"
+  | "chat"
+  | "meta";
+
+export interface IngestRecord {
+  source_kind: string;
+  source_ref?: string;
+  ingested_at: string;
+  smart_pass_at?: string;
 }
 
 export interface SearchHit {
@@ -143,6 +161,7 @@ export interface GraphNode {
   id: string;
   slug: string;
   title: string;
+  kind?: NoteKind;
   tags: string[];
 }
 
