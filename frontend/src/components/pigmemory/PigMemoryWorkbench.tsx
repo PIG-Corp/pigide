@@ -31,6 +31,7 @@ import { PigMemoryEditor } from "./PigMemoryEditor";
 import { MarkdownPreview } from "./MarkdownPreview";
 import { PigMemoryGraph, type PigMemoryGraphHandle } from "./PigMemoryGraph";
 import { ActivityTimeline, type ActivityEvent } from "./ActivityTimeline";
+import { SmartStatusPill } from "./SmartStatusPill";
 import { TagManager } from "./TagManager";
 import { aggregateTags } from "./wikilink";
 
@@ -573,6 +574,7 @@ export function PigMemoryWorkbench() {
         >
           Tags
         </button>
+        <SmartStatusPill workspaceId={currentId} />
         <button
           className="pigmem-toolbar-btn pigmem-toolbar-btn--primary"
           onClick={createNote}
@@ -826,6 +828,23 @@ function Workspace({
   onDelete: () => void;
 }) {
   if (!state.active) {
+    if (state.list.length === 0) {
+      return (
+        <div className="pigmem-blank">
+          <div className="pigmem-onboarding">
+            <h2 className="pigmem-onboarding-title">PigMemory is ready</h2>
+            <p className="pigmem-onboarding-text">
+              Memory fills itself as you work — no manual saves required.
+            </p>
+            <ul className="pigmem-onboarding-bullets">
+              <li>Finish a task → a `task` note appears with summary &amp; files-touched.</li>
+              <li>Run an agent → a `chat` note logs the session, then concepts get extracted.</li>
+              <li>Open the next chat → relevant notes are already in the agent's context.</li>
+            </ul>
+          </div>
+        </div>
+      );
+    }
     return (
       <div className="pigmem-blank">
         <div className="pigmem-blank-card">

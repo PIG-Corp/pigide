@@ -223,6 +223,17 @@ export const ipc = {
     invoke<MemoryStatus>("memory_status", { workspaceId }),
   memoryReindex: (workspaceId: string) =>
     invoke<MemoryStatus>("memory_reindex", { workspaceId }),
+  memorySmartStatus: (workspaceId: string) =>
+    invoke<{
+      enabled: boolean;
+      queue_len: number;
+      interval_seconds: number;
+      model: string;
+    }>("memory_smart_status", { workspaceId }),
+  memorySetSmartSetting: (key: string, value: string) =>
+    invoke<void>("memory_set_smart_setting", { args: { key, value } }),
+  memoryReingestNote: (noteId: string) =>
+    invoke<void>("memory_reingest_note", { noteId }),
 
   voiceListModels: () => invoke<VoiceModel[]>("voice_list_models"),
   voiceSetModel: (modelId: string) =>

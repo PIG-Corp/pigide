@@ -1234,6 +1234,109 @@ pub async fn memory_graph(
     state.memory.graph(&workspace_id).map_err(Into::into)
 }
 
+#[derive(serde::Serialize)]
+pub struct MemorySmartStatus {
+    pub enabled: bool,
+    pub queue_len: i64,
+    pub interval_seconds: u64,
+    pub model: String,
+}
+
+#[tauri::command]
+pub async fn memory_smart_status(
+    state: State<'_, AppState>,
+    workspace_id: String,
+) -> std::result::Result<MemorySmartStatus, String> {
+    use crate::memory::ingest::smart::{
+        DEFAULT_INTERVAL_SECS, DEFAULT_MODEL, KEY_ENABLED, KEY_INTERVAL, KEY_MODEL,
+    };
+    let enabled = crate::db::get_setting(&state.db, KEY_ENABLED)
+        .ok()
+        .flatten()
+        .map(|v| v.to_ascii_lowercase() != "false")
+        .unwrap_or(true);
+    let interval_seconds = crate::db::get_setting(&state.db, KEY_INTERVAL)
+        .ok()
+        .flatten()
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(DEFAULT_INTERVAL_SECS)
+        .max(10);
+    let model = crate::db::get_setting(&state.db, KEY_MODEL)
+        .ok()
+        .flatten()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| DEFAULT_MODEL.to_string());
+    let queue_len = crate::memory::ingest::queue::pending_count(&state.db, &workspace_id)
+        .map_err::<String, _>(Into::into)?;
+    Ok(MemorySmartStatus {
+        enabled,
+        queue_len,
+        interval_seconds,
+        model,
+    })
+}
+
+#[derive(Deserialize)]
+pub struct MemorySetSmartArgs {
+    pub key: String,
+    pub value: String,
+}
+
+#[tauri::command]
+pub async fn memory_set_smart_setting(
+    state: State<'_, AppState>,
+    args: MemorySetSmartArgs,
+) -> std::result::Result<(), String> {
+    use crate::memory::ingest::smart::{
+        KEY_ENABLED, KEY_INTERVAL, KEY_MAX_NEW, KEY_MODEL, KEY_WINDOW,
+    };
+    const ALLOWED: &[&str] = &[
+        KEY_ENABLED,
+        KEY_INTERVAL,
+        KEY_MODEL,
+        KEY_MAX_NEW,
+        KEY_WINDOW,
+    ];
+    if !ALLOWED.contains(&args.key.as_str()) {
+        return Err(format!("setting '{}' not in allowlist", args.key));
+    }
+    crate::db::set_setting(&state.db, &args.key, &args.value).map_err(Into::into)
+}
+
+#[tauri::command]
+pub async fn memory_reingest_note(
+    state: State<'_, AppState>,
+    note_id: String,
+) -> std::result::Result<(), String> {
+    let note = state
+        .memory
+        .get(&note_id)
+        .map_err::<String, _>(Into::into)?;
+    let kind = match note.kind.as_str() {
+        "task" => "task_complete",
+        _ => "chat_chunk",
+    };
+    let payload = serde_json::json!({
+        "note_id": note.id,
+        "task_id": note.slug,
+        "agent_id": note.slug,
+        "chunk_no": 0,
+    });
+    let conn = state.db.get().map_err::<String, _>(|e| e.to_string())?;
+    conn.execute(
+        "INSERT INTO ingest_queue(workspace_id, kind, payload_json, created_at)
+         SELECT workspace_root, ?1, ?2, ?3 FROM memory_notes WHERE id=?4",
+        rusqlite::params![
+            kind,
+            payload.to_string(),
+            chrono::Utc::now().to_rfc3339(),
+            &note.id,
+        ],
+    )
+    .map_err::<String, _>(|e| e.to_string())?;
+    Ok(())
+}
+
 // ---------- Swarm: file ownership + review gates ----------
 
 #[derive(Deserialize)]

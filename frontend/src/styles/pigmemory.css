@@ -496,6 +496,150 @@
   color: var(--fg-subtle);
 }
 
+/* Smart-lane status pill in the header. */
+.pigmem-smart-pill-wrap {
+  position: relative;
+}
+.pigmem-smart-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  color: var(--fg-muted);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 10px;
+  cursor: pointer;
+  font-family: inherit;
+  transition: border-color var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+}
+.pigmem-smart-pill:hover {
+  border-color: var(--border-strong);
+  color: var(--fg);
+}
+.pigmem-smart-pill-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+.pigmem-smart-pill-dot.is-on {
+  background: var(--success);
+  box-shadow: 0 0 0 2px var(--success-soft);
+}
+.pigmem-smart-pill-dot.is-off {
+  background: var(--fg-subtle);
+}
+.pigmem-smart-pill-label {
+  font-variant-caps: all-small-caps;
+  letter-spacing: 0.04em;
+}
+.pigmem-smart-pill-badge {
+  background: var(--accent);
+  color: var(--bg);
+  border-radius: var(--radius-pill);
+  padding: 0 6px;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+.pigmem-smart-popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 20;
+  min-width: 220px;
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-3);
+  padding: 8px;
+  font-size: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.pigmem-smart-popover-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  color: var(--fg);
+}
+.pigmem-smart-popover-row--muted {
+  color: var(--fg-muted);
+  font-size: 11px;
+}
+.pigmem-smart-popover-mono {
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+.pigmem-smart-toggle {
+  background: var(--bg-raised);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-pill);
+  color: var(--fg-muted);
+  font-weight: 600;
+  font-size: 11px;
+  padding: 2px 10px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.pigmem-smart-toggle.is-on {
+  background: var(--success);
+  color: var(--bg);
+  border-color: var(--success);
+}
+
+/* Onboarding empty state — replaces the bare "no notes" message when
+   .pigmemory is fresh. The CTA tells the user the system fills itself
+   from chat + tasks; no manual setup required. */
+.pigmem-onboarding {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 48px 24px;
+  text-align: center;
+  color: var(--fg-muted);
+}
+.pigmem-onboarding-title {
+  color: var(--fg);
+  font-size: 18px;
+  font-weight: 700;
+  margin: 0;
+}
+.pigmem-onboarding-text {
+  max-width: 420px;
+  line-height: 1.55;
+  margin: 0;
+}
+.pigmem-onboarding-bullets {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  text-align: left;
+}
+.pigmem-onboarding-bullets li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.pigmem-onboarding-bullets li::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex-shrink: 0;
+}
+.pigmem-onboarding-bullets li:nth-child(2)::before { background: var(--info); }
+.pigmem-onboarding-bullets li:nth-child(3)::before { background: var(--warn); }
+
 /* ── Note list (virtualised) ──────────────────────────── */
 .pigmem-list {
   flex: 1;
