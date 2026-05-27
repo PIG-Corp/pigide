@@ -29,6 +29,10 @@ pub fn ensure_root(root: &std::path::Path) -> Result<()> {
     Ok(())
 }
 
+/// Resolve a slug (possibly nested, e.g. `tasks/abc-123`) to an absolute
+/// path under `root`. Intended for **write paths only** — the parent
+/// directory is created on the way out so callers can `note::write`
+/// directly. Read paths should resolve via the stored `path` column.
 pub fn slug_to_path(root: &Path, slug: &str) -> Result<PathBuf> {
     validate_slug(slug)?;
     let base = root.canonicalize()?;
