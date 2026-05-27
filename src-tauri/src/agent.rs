@@ -677,10 +677,12 @@ impl AgentManager {
                             (ingest_memory.clone(), ingest_buffer.clone())
                         {
                             let app_for_flush = app.clone();
+                            let db_for_flush = db.clone();
                             let aid = agent_id.clone();
                             tauri::async_runtime::spawn(async move {
                                 crate::memory::ingest::chat_chunk::flush_now(
                                     mem,
+                                    db_for_flush,
                                     app_for_flush,
                                     buf,
                                     &aid,

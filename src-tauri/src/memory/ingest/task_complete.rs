@@ -94,7 +94,7 @@ pub fn on_task_complete_inner(
         ingested_at: Utc::now().to_rfc3339(),
         smart_pass_at: None,
     };
-    memory.upsert_by_slug(
+    let note = memory.upsert_by_slug(
         workspace_id,
         &slug,
         &title,
@@ -102,7 +102,9 @@ pub fn on_task_complete_inner(
         Vec::new(),
         Kind::Task,
         Some(ingest),
-    )
+    )?;
+    let _ = super::queue::enqueue_task(db, workspace_id, task_id, &note.id);
+    Ok(note)
 }
 
 /// Tauri-aware entry point. Honours the `memory.fast_ingest.enabled`

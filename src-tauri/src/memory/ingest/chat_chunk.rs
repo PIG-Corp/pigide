@@ -164,7 +164,7 @@ pub fn on_pty_stdout(
     let threshold = line_threshold(&db);
     let trip = buffer.push(&agent_id, &decoded, threshold);
     if trip {
-        flush_now(memory, app, buffer, &agent_id);
+        flush_now(memory, db, app, buffer, &agent_id);
     }
 }
 
@@ -173,6 +173,7 @@ pub fn on_pty_stdout(
 /// threshold trips.
 pub fn flush_now(
     memory: Arc<MemoryService>,
+    db: DbPool,
     app: Option<AppHandle>,
     buffer: Arc<ChatBuffer>,
     agent_id: &str,
@@ -203,6 +204,13 @@ pub fn flush_now(
     );
     match res {
         Ok(note) => {
+            let _ = super::queue::enqueue_chat(
+                &db,
+                &chunk.workspace_id,
+                agent_id,
+                &note.id,
+                chunk.chunk_no,
+            );
             if let Some(app) = app {
                 super::events::emit_note_created(
                     &app,
