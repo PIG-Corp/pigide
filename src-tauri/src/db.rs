@@ -45,7 +45,7 @@ pub(crate) fn migrate_one(conn: &rusqlite::Connection) -> Result<()> {
     let current: i64 = conn
         .query_row("PRAGMA user_version;", [], |r| r.get(0))
         .unwrap_or(0);
-    let target = 16;
+    let target = 17;
     if current >= target {
         return Ok(());
     }
@@ -512,6 +512,27 @@ pub(crate) fn migrate_one(conn: &rusqlite::Connection) -> Result<()> {
              ALTER TABLE memory_notes ADD COLUMN kind TEXT NOT NULL DEFAULT 'source';
              ALTER TABLE memory_notes ADD COLUMN ingest_json TEXT;
              CREATE INDEX IF NOT EXISTS idx_notes_kind ON memory_notes(workspace_root, kind);
+             COMMIT;",
+        )?;
+    }
+    if current < 17 {
+        // PigMemory Phase 2: queue of items the smart-lane worker should
+        // enrich with concepts/entities. Populated by the fast-lane on
+        // task→complete and chat-rotation; drained by smart::SmartIngestWorker.
+        conn.execute_batch(
+            "BEGIN;
+             CREATE TABLE IF NOT EXISTS ingest_queue (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                workspace_id    TEXT    NOT NULL,
+                kind            TEXT    NOT NULL,
+                payload_json    TEXT    NOT NULL,
+                created_at      TEXT    NOT NULL,
+                processed_at    TEXT,
+                last_error      TEXT,
+                smart_attempts  INTEGER NOT NULL DEFAULT 0
+             );
+             CREATE INDEX IF NOT EXISTS idx_ingest_pending
+                ON ingest_queue(workspace_id, processed_at);
              COMMIT;",
         )?;
     }
