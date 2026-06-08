@@ -40,7 +40,50 @@ pigide-buildup.json
 
 # Local runtime data
 .pigmemory/
+.pigmemory/**
 
 # Playwright artifacts
 test-results/
 playwright-report/
+.playwright-mcp/
+
+# Agent / planning / personal — never commit
+.planning/
+.planning/**
+.devin/
+.devin/**
+.claude/
+.claude/**
+
+# Audits and reports
+audit/
+docs/audit/
+docs/prompts/backup/
+docs/prompts/draft/
+docs/backup/
+docs/draft/
+AUDIT*.md
+audit-*.md
+audit_*.md
+UI-AUDIT.md
+PRODUCTION_READINESS.md
+RELEASE_BLOCKERS.md
+CONSOLIDATED_AUDIT.md
+UI-AUDIT*.md
+
+# Backups and temp files
+*.backup-*
+*.bak
+*.draft
+*.tmp
+*.orig
+*~
+__pycache__/
+*.pyc
+
+# Screenshots / large media not in source
+target*.png
+target_dark_screenshot.png
+target_light_screenshot.png
+panel.png
+chat.png
