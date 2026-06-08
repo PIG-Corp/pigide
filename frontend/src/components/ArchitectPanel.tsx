@@ -16,6 +16,7 @@ import {
 import { ipc } from "../state/ipc";
 
 const ARCHITECT_MODELS = [
+  "kr/claude-opus-4.8",
   "kr/claude-opus-4.7",
   "kr/claude-opus-4.6",
   "kr/claude-sonnet-4.6",
@@ -52,7 +53,10 @@ export function ArchitectPanel() {
 
   // Initial config + log + event subscriptions.
   useEffect(() => {
+    // B-1.2: keep `dead` so a listener that resolves after unmount is
+    // unlistened immediately and won't fire into a stale closure.
     let dead = false;
+    const unsubs: (() => void)[] = [];
     void (async () => {
       try {
         const cfg = await architectIpc.getConfig();
@@ -63,17 +67,25 @@ export function ArchitectPanel() {
         console.warn("architect init", e);
       }
     })();
-    const unsubs: Array<Promise<() => void>> = [
-      onArchitectDecision((d) => pushDecision(d)),
-      onArchitectSignal((e) => {
-        const m: Record<string, (typeof e.signals)[number]["signal"]> = {};
-        for (const s of e.signals) m[s.agent_id] = s.signal;
-        setSignals(m);
-      }),
-    ];
+    onArchitectDecision((d) => {
+      if (dead) return;
+      pushDecision(d);
+    }).then((u) => {
+      if (dead) u();
+      else unsubs.push(u);
+    });
+    onArchitectSignal((e) => {
+      if (dead) return;
+      const m: Record<string, (typeof e.signals)[number]["signal"]> = {};
+      for (const s of e.signals) m[s.agent_id] = s.signal;
+      setSignals(m);
+    }).then((u) => {
+      if (dead) u();
+      else unsubs.push(u);
+    });
     return () => {
       dead = true;
-      unsubs.forEach((p) => void p.then((u) => u()));
+      unsubs.forEach((u) => u());
     };
   }, [pushDecision, setDecisions, setEnabled, setSignals]);
 

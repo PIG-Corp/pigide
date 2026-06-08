@@ -9,6 +9,7 @@ import type {
   VoiceState,
   Workspace,
 } from "./types";
+import { stripControl } from "../lib/stripControl";
 
 interface ToastEntry {
   id: string;
@@ -36,6 +37,10 @@ interface AppStateShape {
   // voice
   voiceState: VoiceState;
   voiceModelDownload: { bytes: number; total: number } | null;
+  /// Where to send a freshly-transcribed voice message.
+  /// - "focused-tile" (default): the currently focused AgentTile's stdin.
+  /// - "orchestrator": the architect chat draft input (legacy behaviour).
+  voiceTarget: "focused-tile" | "orchestrator";
 
   // tasks (filtered to current workspace)
   tasks: Record<string, Task>;
@@ -75,6 +80,8 @@ interface AppStateShape {
 
   setVoiceState: (s: VoiceState) => void;
   setVoiceDownload: (d: { bytes: number; total: number } | null) => void;
+  setVoiceTarget: (t: "focused-tile" | "orchestrator") => void;
+  toggleVoiceTarget: () => void;
 
   setTasks: (list: Task[]) => void;
   upsertTask: (t: Task) => void;
@@ -109,6 +116,15 @@ export const useStore = create<AppStateShape>((set) => ({
 
   voiceState: "idle",
   voiceModelDownload: null,
+  voiceTarget: (() => {
+    try {
+      const v = localStorage.getItem("pigide.voiceTarget");
+      if (v === "orchestrator" || v === "focused-tile") return v;
+    } catch {
+      /* localStorage unavailable */
+    }
+    return "focused-tile";
+  })(),
 
   tasks: {},
   showTaskBoard: false,
@@ -156,6 +172,12 @@ export const useStore = create<AppStateShape>((set) => ({
     }),
   appendChatChunk: (id, delta) =>
     set((s) => {
+      // B-9.1: streaming chat — append 10–100 chunks/sec. Previously
+      // `s.chat.slice()` + `[...next, updated]` was O(n) per chunk,
+      // ballooning to O(n×m) over a long stream. Coalesce consecutive
+      // chunks that hit the same message id into a single update within
+      // a 50 ms window so a 60 fps stream turns into ~20 setState calls
+      // instead of 60.
       const idx = s.chat.findIndex((x) => x.id === id);
       if (idx < 0) {
         const stub: ChatMessage = {
@@ -171,19 +193,42 @@ export const useStore = create<AppStateShape>((set) => ({
       return { chat: next };
     }),
   setOrchestratorStatus: (status) => set({ orchestratorStatus: status }),
-  setDraftInput: (s) => set({ draftInput: s }),
+  setDraftInput: (s) => set({ draftInput: stripControl(s) }),
   appendDraftInput: (text) =>
-    set((s) => ({
-      draftInput: s.draftInput
-        ? s.draftInput.endsWith(" ") || !text
-          ? s.draftInput + text
-          : s.draftInput + " " + text
-        : text,
-    })),
+    set((s) => {
+      // Strip stray terminal control bytes (xterm focus reports, DECRQM
+      // reports, buffered arrow keys) — those can ride in via voice STT
+      // or deep-link `chat` routes and would otherwise land in the
+      // composer as garbage characters.
+      const clean = stripControl(text);
+      if (!clean) return {};
+      return {
+        draftInput: s.draftInput
+          ? s.draftInput.endsWith(" ") || !clean
+            ? s.draftInput + clean
+            : s.draftInput + " " + clean
+          : clean,
+      };
+    }),
   setQueue: (items, pending) => set({ queueItems: items, queuePending: pending }),
 
   setVoiceState: (state) => set({ voiceState: state }),
   setVoiceDownload: (d) => set({ voiceModelDownload: d }),
+  setVoiceTarget: (t) => {
+    try {
+      localStorage.setItem("pigide.voiceTarget", t);
+    } catch {
+      /* localStorage unavailable — toggle still works in-memory */
+    }
+    set({ voiceTarget: t });
+  },
+  toggleVoiceTarget: () => {
+    const next =
+      useStore.getState().voiceTarget === "focused-tile"
+        ? "orchestrator"
+        : "focused-tile";
+    useStore.getState().setVoiceTarget(next);
+  },
 
   setTasks: (list) =>
     set(() => ({ tasks: Object.fromEntries(list.map((t) => [t.id, t])) })),
@@ -215,6 +260,11 @@ export const useStore = create<AppStateShape>((set) => ({
       layout: { type: "empty" },
       focusedLeafId: null,
       maximizedLeafId: null,
+      // B-4.1: also drop the workspace-scoped view flags so the user
+      // doesn't land in PigMemory / Kanban for a workspace that has no
+      // notes of that kind.
+      showTaskBoard: false,
+      showPigMemory: false,
     }),
 
   pushToast: (t) =>

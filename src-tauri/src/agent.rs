@@ -249,6 +249,9 @@ impl AgentManager {
     /// stdout, and direct fs access is cheaper than an RPC round-trip
     /// for the 64 KiB scrollback replay on tile mount.
     pub fn read_log_tail(&self, agent_id: &str, max_bytes: usize) -> Result<Vec<u8>> {
+        if !is_safe_agent_id(agent_id) {
+            return Err(Error::Invalid(format!("invalid agent id: {}", agent_id)));
+        }
         let path = log_dir().join(format!("{}.log", agent_id));
         if !path.exists() {
             return Ok(Vec::new());
@@ -338,13 +341,18 @@ impl AgentManager {
             block_on_safely(async move { client.list_all().await }).map_err(client_to_error)?
         };
 
-        let conn = self.db.get()?;
+        let mut conn = self.db.get()?;
         let live_ids: Vec<&str> = live.iter().map(|a| a.id.as_str()).collect();
+        // Atomic: the "mark stale rows exited" UPDATE and the UPSERT of every
+        // live agent must land together. A crash between them used to leave
+        // the mirror inconsistent (rows marked exited but the replacement
+        // UPSERT never applied). One transaction closes that window.
+        let tx = conn.transaction()?;
         // Mark anything the broker doesn't know about as exited.
         // Use a single UPDATE with NOT IN (...). For empty sets we just
         // mark everything 'running' as exited.
         if live_ids.is_empty() {
-            conn.execute(
+            tx.execute(
                 "UPDATE agents SET status='exited' WHERE status='running'",
                 [],
             )?;
@@ -360,11 +368,11 @@ impl AgentManager {
             );
             let params: Vec<&dyn rusqlite::ToSql> =
                 live_ids.iter().map(|s| s as &dyn rusqlite::ToSql).collect();
-            conn.execute(&sql, &*params)?;
+            tx.execute(&sql, &*params)?;
         }
         // UPSERT broker's view of every live agent.
         for a in &live {
-            conn.execute(
+            tx.execute(
                 "INSERT INTO agents(id,workspace_id,type,cwd,status,created_at)
                  VALUES(?1,?2,?3,?4,'running',?5)
                  ON CONFLICT(id) DO UPDATE SET
@@ -375,6 +383,7 @@ impl AgentManager {
                 rusqlite::params![&a.id, &a.workspace_id, &a.agent_type, &a.cwd, &a.created_at],
             )?;
         }
+        tx.commit()?;
         drop(conn);
 
         // Register restored agents with the chat-buffer so flushes resolve.
@@ -611,6 +620,14 @@ impl AgentManager {
     /// Spawn the long-running task that consumes broker events and
     /// re-emits them as Tauri `EV_AGENT_STDOUT` / `EV_AGENT_EXIT`
     /// events. Also keeps the per-agent `last_stdout` cache fresh.
+    ///
+    /// Stdout coalescing: per-agent chunks are buffered and flushed on a
+    /// 50 ms ticker. Active CLI agents emit ~60–120 PTY reads/sec; without
+    /// coalescing that is one Tauri event per chunk (= 60–120 IPC events /
+    /// sec × 6 agents ≈ 500 events/sec), each carrying a base64 blob —
+    /// the IPC channel becomes the bottleneck and the webview can
+    /// visibly stutter. Batching at 50 ms caps the per-agent rate to ≤20
+    /// events/sec with no perceptual lag for terminal output.
     fn start_event_pump(
         &self,
         mut events: EventReceiver,
@@ -626,12 +643,45 @@ impl AgentManager {
         let db = self.db.clone();
         let ingest_memory = self.ingest_memory.lock().clone();
         let ingest_buffer = self.ingest_buffer.lock().clone();
-        tauri::async_runtime::spawn(async move {
-            loop {
-                match events.recv().await {
-                    Ok(Event::Stdout { agent_id, data_b64 }) => {
+
+        // Coalesce buffer: agent_id → (decoded chunks, base64 length to drop
+        // from any tail). We accumulate the *raw bytes* and re-encode the
+        // merged buffer at flush time so the wire payload is one base64
+        // string instead of N.
+        let pending: Arc<Mutex<HashMap<String, Vec<u8>>>> = Arc::new(Mutex::new(HashMap::new()));
+        let wake = Arc::new(tokio::sync::Notify::new());
+
+        // Flush task: every 50 ms (or on notify), drain `pending` and emit
+        // one `EV_AGENT_STDOUT` event per non-empty agent.
+        {
+            let pending = pending.clone();
+            let app = app.clone();
+            let last_stdout = last_stdout.clone();
+            let wake = wake.clone();
+            tauri::async_runtime::spawn(async move {
+                use base64::Engine as _;
+                use std::time::Duration;
+                let enc = base64::engine::general_purpose::STANDARD;
+                loop {
+                    // Wake either on a 50 ms tick or on explicit notify.
+                    tokio::select! {
+                        _ = tokio::time::sleep(Duration::from_millis(50)) => {}
+                        _ = wake.notified() => {}
+                    }
+                    let drained: Vec<(String, Vec<u8>)> = {
+                        let mut buf = pending.lock();
+                        if buf.is_empty() {
+                            continue;
+                        }
+                        buf.drain().collect()
+                    };
+                    for (agent_id, bytes) in drained {
+                        if bytes.is_empty() {
+                            continue;
+                        }
                         last_stdout.lock().insert(agent_id.clone(), Instant::now());
                         if let Some(app) = &app {
+                            let data_b64 = enc.encode(&bytes);
                             let _ = app.emit(
                                 EV_AGENT_STDOUT,
                                 serde_json::json!({
@@ -639,6 +689,29 @@ impl AgentManager {
                                     "data_b64": data_b64,
                                 }),
                             );
+                        }
+                    }
+                }
+            });
+        }
+
+        tauri::async_runtime::spawn(async move {
+            use base64::Engine as _;
+            let dec = base64::engine::general_purpose::STANDARD;
+            loop {
+                match events.recv().await {
+                    Ok(Event::Stdout { agent_id, data_b64 }) => {
+                        // Decode once; merge into the per-agent pending buffer.
+                        // The fast-lane ingest also gets a decoded copy — it
+                        // buffers text chunks at a much larger threshold
+                        // (so the additional cost is negligible).
+                        if let Some(bytes) = dec.decode(&data_b64).ok() {
+                            pending
+                                .lock()
+                                .entry(agent_id.clone())
+                                .or_default()
+                                .extend_from_slice(&bytes);
+                            wake.notify_one();
                         }
                         // Fast-lane chat ingest: buffer per-agent stdout, flush
                         // on threshold or agent exit. No-op when handles aren't
@@ -661,6 +734,26 @@ impl AgentManager {
                         }
                     }
                     Ok(Event::Exit { agent_id }) => {
+                        // Drain the coalescing buffer for this agent so the
+                        // last bits of its output reach the UI before the
+                        // exit event lands.
+                        let tail_bytes: Option<Vec<u8>> = pending.lock().remove(&agent_id);
+                        if let Some(bytes) = tail_bytes {
+                            if !bytes.is_empty() {
+                                use base64::Engine as _;
+                                let enc = base64::engine::general_purpose::STANDARD;
+                                if let Some(app) = &app {
+                                    let data_b64 = enc.encode(&bytes);
+                                    let _ = app.emit(
+                                        EV_AGENT_STDOUT,
+                                        serde_json::json!({
+                                            "agent_id": agent_id,
+                                            "data_b64": data_b64,
+                                        }),
+                                    );
+                                }
+                            }
+                        }
                         if let Ok(c) = db.get() {
                             let _ = c.execute(
                                 "UPDATE agents SET status='exited' WHERE id=?1",
@@ -705,6 +798,23 @@ impl AgentManager {
             }
         });
     }
+}
+
+/// True when `id` is safe to use as a single filename component. Agent ids
+/// are broker-minted UUIDs, but `reuse_id` (and any id arriving from the
+/// webview) is caller-controlled and lands in `format!("{}.log", id)`. A
+/// crafted id like `../../etc/passwd` would otherwise traverse out of the
+/// log dir. We require a non-empty, bounded id of `[A-Za-z0-9._-]` with no
+/// path separators and no `..` sequence.
+pub fn is_safe_agent_id(id: &str) -> bool {
+    if id.is_empty() || id.len() > 128 {
+        return false;
+    }
+    if id.contains("..") {
+        return false;
+    }
+    id.chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.')
 }
 
 /// Path to the broker's per-agent stdout log directory. Must match
@@ -857,6 +967,32 @@ mod tests {
             .query_row("SELECT status FROM agents WHERE id='a'", [], |r| r.get(0))
             .unwrap();
         assert_eq!(s, "running");
+    }
+
+    #[test]
+    fn is_safe_agent_id_accepts_uuids() {
+        assert!(is_safe_agent_id("550e8400-e29b-41d4-a716-446655440000"));
+        assert!(is_safe_agent_id("tile-claude_1"));
+        assert!(is_safe_agent_id("a.b-c_d"));
+    }
+
+    #[test]
+    fn is_safe_agent_id_rejects_traversal_and_separators() {
+        assert!(!is_safe_agent_id(""));
+        assert!(!is_safe_agent_id("../../etc/passwd"));
+        assert!(!is_safe_agent_id("a/b"));
+        assert!(!is_safe_agent_id("a\\b"));
+        assert!(!is_safe_agent_id(".."));
+        assert!(!is_safe_agent_id("foo/../bar"));
+        assert!(!is_safe_agent_id(&"x".repeat(129)));
+    }
+
+    #[test]
+    fn read_log_tail_rejects_unsafe_id() {
+        let p = test_pool();
+        let mgr = AgentManager::new(p);
+        let err = mgr.read_log_tail("../../etc/passwd", 1024).unwrap_err();
+        assert!(matches!(err, Error::Invalid(_)));
     }
 }
 

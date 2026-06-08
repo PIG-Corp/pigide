@@ -9,8 +9,7 @@ import os
 import subprocess
 import sys
 
-PROJECT_ROOT = "/home/camer/pigide"
-TAURI_DIR = os.path.join(PROJECT_ROOT, "src-tauri")
+TAURI_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../src-tauri")
 
 
 def main() -> int:

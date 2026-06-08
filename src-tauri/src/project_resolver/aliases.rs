@@ -2,7 +2,7 @@
 //!
 //! Format:
 //! ```jsonc
-//! { "aliases": ["drugs", "drugs plugin"] }
+//! { "aliases": ["widget", "widget plugin"] }
 //! ```
 //!
 //! The file is per-project (not per-workspace) so aliases survive
@@ -112,8 +112,8 @@ mod tests {
     #[test]
     fn add_dedupes_case_insensitive() {
         let d = tmp();
-        add(&d, "drugs").unwrap();
-        let saved = add(&d, "DRUGS").unwrap();
+        add(&d, "widget").unwrap();
+        let saved = add(&d, "WIDGET").unwrap();
         assert_eq!(saved.len(), 1);
         std::fs::remove_dir_all(&d).ok();
     }
@@ -121,9 +121,9 @@ mod tests {
     #[test]
     fn remove_works() {
         let d = tmp();
-        add(&d, "drugs").unwrap();
+        add(&d, "widget").unwrap();
         add(&d, "плагин").unwrap();
-        let saved = remove(&d, "DRUGS").unwrap();
+        let saved = remove(&d, "WIDGET").unwrap();
         assert_eq!(saved, vec!["плагин".to_string()]);
         std::fs::remove_dir_all(&d).ok();
     }

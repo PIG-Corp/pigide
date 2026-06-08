@@ -18,7 +18,7 @@ export function KanbanBoard() {
   const setTasks = useStore((s) => s.setTasks);
   const upsertTask = useStore((s) => s.upsertTask);
   const removeTask = useStore((s) => s.removeTask);
-  const setShowKanban = useStore((s) => s.setShowKanban);
+  const setShowKanban = useStore((s) => s.setShowTaskBoard);
   const pushToast = useStore((s) => s.pushToast);
 
   const [creating, setCreating] = useState(false);
@@ -237,10 +237,7 @@ function KanbanCard({
     <div
       className={`kanban-card status-${task.status}`}
       draggable
-      onDragStart={(e) => {
-        e.dataTransfer.effectAllowed = "move";
-        onDragStart();
-      }}
+      onDragStart={onDragStart}
       onDragEnd={onDragEnd}
       onClick={onClick}
     >

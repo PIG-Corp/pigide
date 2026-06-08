@@ -85,6 +85,13 @@ fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
         Err(_) => return,
     };
     for entry in entries.flatten() {
+        // Skip symlinks: a symlink planted inside `.pigmemory/` could
+        // otherwise make the migrator read and rewrite a `.md` file
+        // anywhere on disk the user can reach. `file_type()` does not
+        // follow the link, so this is the no-follow check.
+        if entry.file_type().map(|t| t.is_symlink()).unwrap_or(true) {
+            continue;
+        }
         let p = entry.path();
         if p.is_dir() {
             walk(&p, out);

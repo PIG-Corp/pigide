@@ -5,6 +5,7 @@ import { Pencil, Settings, Trash2 } from "./icons";
 import { ThemePicker } from "./ThemePicker";
 import { NewWorkspaceModal } from "./NewWorkspaceModal";
 import { useTheme } from "../themes/useTheme";
+import { useSwitchWorkspace } from "../state/useSwitchWorkspace";
 
 const STATUS_COLORS = ["#4ADE80", "#60A5FA", "#E89A4A", "#EF4444", "#C084FC"];
 
@@ -19,10 +20,10 @@ export function WorkspaceSidebar() {
   const setCurrent = useStore((s) => s.setCurrent);
   const setLayout = useStore((s) => s.setLayout);
   const setAgents = useStore((s) => s.setAgents);
-  const clearWorkspaceState = useStore((s) => s.clearWorkspaceState);
   const pushToast = useStore((s) => s.pushToast);
   const newOpen = useStore((s) => s.newWorkspaceModalOpen);
   const setNewOpen = useStore((s) => s.setNewWorkspaceModalOpen);
+  const switchWorkspace = useSwitchWorkspace();
   const [pickerOpen, setPickerOpen] = useState(false);
   const [tooltip, setTooltip] = useState<{ text: string; x: number; y: number } | null>(null);
   const { theme } = useTheme();
@@ -36,18 +37,8 @@ export function WorkspaceSidebar() {
     }
   };
 
-  const switchTo = async (id: string) => {
-    try {
-      clearWorkspaceState();
-      await ipc.setCurrentWorkspace(id);
-      setCurrent(id);
-      const ws = await ipc.getWorkspace(id);
-      setLayout(ws.layout);
-      const agents = await ipc.listAgents(id);
-      setAgents(agents);
-    } catch (err) {
-      pushToast({ text: `Switch failed: ${err}`, kind: "error" });
-    }
+  const switchTo = (id: string) => {
+    void switchWorkspace(id);
   };
 
   const create = () => setNewOpen(true);
@@ -56,7 +47,7 @@ export function WorkspaceSidebar() {
     try {
       const list = await ipc.listWorkspaces();
       setWorkspaces(list);
-      await switchTo(id);
+      await switchWorkspace(id);
     } catch (err) {
       pushToast({ text: `Reload failed: ${err}`, kind: "error" });
     }
@@ -79,7 +70,7 @@ export function WorkspaceSidebar() {
       await ipc.deleteWorkspace(id);
       await reload();
       const remaining = (await ipc.listWorkspaces())[0];
-      if (remaining) await switchTo(remaining.id);
+      if (remaining) await switchWorkspace(remaining.id);
       else {
         setCurrent(null);
         setLayout({ type: "empty" });
@@ -92,7 +83,28 @@ export function WorkspaceSidebar() {
 
   const showTooltip = (e: React.MouseEvent, paths: string[] | undefined) => {
     if (!paths || paths.length === 0) return;
-    setTooltip({ text: paths.join(", "), x: e.clientX + 12, y: e.clientY - 4 });
+    // B-12.42: collapse the user's $HOME prefix to `~` so a screencast or
+    // shoulder-surf doesn't leak the full path. Anything that doesn't
+    // start with `/home/` is left as-is (e.g. `/var`, `/opt`).
+    const HOME_PREFIX = "/home/";
+    const homeUser = paths.find((p) => p.startsWith(HOME_PREFIX));
+    const homeUserSegment = homeUser
+      ? HOME_PREFIX + (homeUser.split("/")[2] ?? "") + "/"
+      : null;
+    const safePaths = paths.map((p) => {
+      if (homeUserSegment && p.startsWith(homeUserSegment)) {
+        return "~/" + p.slice(homeUserSegment.length);
+      }
+      return p;
+    });
+    // B-12.37: clamp the tooltip position to the viewport so it doesn't
+    // bleed off the right/bottom edge.
+    const margin = 8;
+    const tipW = 320; // rough max width; CSS will truncate
+    const tipH = 60;
+    const x = Math.max(margin, Math.min(window.innerWidth - tipW - margin, e.clientX + 12));
+    const y = Math.max(margin, Math.min(window.innerHeight - tipH - margin, e.clientY - 4));
+    setTooltip({ text: safePaths.join(", "), x, y });
   };
 
   const hideTooltip = () => setTooltip(null);

@@ -1,6 +1,6 @@
 # pigide — Design Spec for `target.png`
 
-> Source of truth: `/home/camer/pigide/target.png`. This document is the
+> Source of truth: `docs/design-spec-target.png` placed next to this file. This document is the
 > measurable contract for the three parallel builders. Every value here is a
 > hard target — implementers must hit ±1px / ±2% on color, never invent new
 > tokens, and never silently substitute "close enough" components.

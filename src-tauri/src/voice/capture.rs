@@ -6,7 +6,7 @@ use std::sync::Arc;
 pub struct CaptureState {
     pub samples: Vec<f32>,
     pub source_rate: u32,
-    pub recording: bool,
+    recording: bool,
 }
 
 impl Default for CaptureState {
@@ -42,7 +42,12 @@ impl Capture {
     }
 
     pub fn is_recording(&self) -> bool {
-        self.state.lock().recording
+        // `try_lock` so a stuck `stop()` call from another thread never
+        // freezes the audio thread. Worst case: a stale `true` is
+        // returned once between recording→idle transition; the audio
+        // callback itself reads `recording` under the same try_lock and
+        // bails on `false`, so this is harmless.
+        self.state.try_lock().map(|s| s.recording).unwrap_or(false)
     }
 
     pub fn start(&self) -> Result<()> {
@@ -70,79 +75,86 @@ impl Capture {
         let state = self.state.clone();
         let err_fn = |e| tracing::warn!("audio stream error: {:?}", e);
 
+        // Append `in_buf` to the shared samples vector. Uses `try_lock`
+        // so the audio callback never blocks: if the Tauri command
+        // thread is in the middle of reading `samples` (e.g. on stop()),
+        // the chunk is silently dropped — a 1–2 ms audio xrun is inaudible
+        // and infinitely preferable to blocking the audio thread (which
+        // causes visible stutter / dropped frames in the user's other
+        // apps, including foreground games).
+        fn append_mono(state: &Arc<Mutex<CaptureState>>, in_buf: &[f32], channels: usize) {
+            if let Some(mut s) = state.try_lock() {
+                if !s.recording {
+                    return;
+                }
+                if channels == 1 {
+                    s.samples.extend_from_slice(in_buf);
+                } else {
+                    // Pre-reserve to avoid repeated realloc on the audio
+                    // thread under load (sustained recording of a 48 kHz
+                    // stereo stream otherwise reallocates the Vec every
+                    // ~50 ms).
+                    let frames = in_buf.len() / channels;
+                    s.samples.reserve(frames);
+                    for chunk in in_buf.chunks(channels) {
+                        let v = chunk.iter().sum::<f32>() / channels as f32;
+                        s.samples.push(v);
+                    }
+                }
+                // 60 s cap @ 48 kHz ≈ 2.88M samples.
+                if s.samples.len() > 60 * 48_000 {
+                    let cut = s.samples.len() - 60 * 48_000;
+                    s.samples.drain(0..cut);
+                }
+            }
+            // else: lock contended — drop the chunk. Better an inaudible
+            // xrun than a 1-30 ms block on the OS audio thread.
+        }
+
         let stream = match config.sample_format() {
             cpal::SampleFormat::F32 => device.build_input_stream(
                 &config.into(),
-                move |data: &[f32], _| {
-                    let mut s = state.lock();
-                    if !s.recording {
-                        return;
-                    }
-                    if channels == 1 {
-                        s.samples.extend_from_slice(data);
-                    } else {
-                        for chunk in data.chunks(channels) {
-                            let v = chunk.iter().sum::<f32>() / channels as f32;
-                            s.samples.push(v);
-                        }
-                    }
-                    // 60 s cap @ 48kHz ≈ 2.88M samples.
-                    if s.samples.len() > 60 * 48_000 {
-                        let cut = s.samples.len() - 60 * 48_000;
-                        s.samples.drain(0..cut);
-                    }
-                },
+                move |data: &[f32], _| append_mono(&state, data, channels),
                 err_fn,
                 None,
             ),
-            cpal::SampleFormat::I16 => device.build_input_stream(
-                &config.into(),
-                move |data: &[i16], _| {
-                    let mut s = state.lock();
-                    if !s.recording {
-                        return;
-                    }
-                    if channels == 1 {
-                        s.samples
-                            .extend(data.iter().map(|&v| v as f32 / i16::MAX as f32));
-                    } else {
-                        for chunk in data.chunks(channels) {
-                            let v: f32 = chunk
-                                .iter()
-                                .map(|&s| s as f32 / i16::MAX as f32)
-                                .sum::<f32>()
-                                / channels as f32;
-                            s.samples.push(v);
+            cpal::SampleFormat::I16 => {
+                // Convert I16→f32 into a HEAP buffer first, then append
+                // under the (try)lock. Keeps the lock window to a
+                // single `extend_from_slice` and avoids per-sample
+                // division inside the critical section. Box<[f32; N]>
+                // lives in the closure (no stack-overflow risk on
+                // 16 KiB buffers), and is captured by-move — each audio
+                // callback reuses the same allocation.
+                let mut stack = Box::new([0f32; 16 * 1024]);
+                device.build_input_stream(
+                    &config.into(),
+                    move |data: &[i16], _| {
+                        let n = data.len().min(stack.len());
+                        for (i, &s) in data[..n].iter().enumerate() {
+                            stack[i] = s as f32 / i16::MAX as f32;
                         }
-                    }
-                },
-                err_fn,
-                None,
-            ),
-            cpal::SampleFormat::U16 => device.build_input_stream(
-                &config.into(),
-                move |data: &[u16], _| {
-                    let mut s = state.lock();
-                    if !s.recording {
-                        return;
-                    }
-                    if channels == 1 {
-                        s.samples
-                            .extend(data.iter().map(|&v| (v as f32 - 32768.0) / 32768.0));
-                    } else {
-                        for chunk in data.chunks(channels) {
-                            let v: f32 = chunk
-                                .iter()
-                                .map(|&s| (s as f32 - 32768.0) / 32768.0)
-                                .sum::<f32>()
-                                / channels as f32;
-                            s.samples.push(v);
+                        append_mono_mixed(&state, &stack[..n], channels);
+                    },
+                    err_fn,
+                    None,
+                )
+            }
+            cpal::SampleFormat::U16 => {
+                let mut stack = Box::new([0f32; 16 * 1024]);
+                device.build_input_stream(
+                    &config.into(),
+                    move |data: &[u16], _| {
+                        let n = data.len().min(stack.len());
+                        for (i, &s) in data[..n].iter().enumerate() {
+                            stack[i] = (s as f32 - 32768.0) / 32768.0;
                         }
-                    }
-                },
-                err_fn,
-                None,
-            ),
+                        append_mono_mixed(&state, &stack[..n], channels);
+                    },
+                    err_fn,
+                    None,
+                )
+            }
             other => {
                 return Err(Error::Voice(format!(
                     "unsupported sample format: {:?}",
@@ -169,6 +181,31 @@ impl Capture {
         *self.stream.lock() = None;
         let s = self.state.lock();
         Ok((s.samples.clone(), s.source_rate))
+    }
+}
+
+/// Mixed-channel appender for the I16/U16 paths (the F32 path uses
+/// `append_mono` directly because it can `extend_from_slice` without
+/// per-sample conversion). Same `try_lock` discipline.
+fn append_mono_mixed(state: &Arc<Mutex<CaptureState>>, mono_buf: &[f32], channels: usize) {
+    if let Some(mut s) = state.try_lock() {
+        if !s.recording {
+            return;
+        }
+        if channels == 1 {
+            s.samples.extend_from_slice(mono_buf);
+        } else {
+            let frames = mono_buf.len() / channels;
+            s.samples.reserve(frames);
+            for chunk in mono_buf.chunks(channels) {
+                let v = chunk.iter().sum::<f32>() / channels as f32;
+                s.samples.push(v);
+            }
+        }
+        if s.samples.len() > 60 * 48_000 {
+            let cut = s.samples.len() - 60 * 48_000;
+            s.samples.drain(0..cut);
+        }
     }
 }
 

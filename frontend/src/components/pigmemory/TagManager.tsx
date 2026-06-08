@@ -44,7 +44,11 @@ export function TagManager({
       setEditing(null);
       await onChanged();
     } catch (e: unknown) {
-      setError(`Rename failed: ${e}`);
+      // B-12.13: an Error object would otherwise stringify to
+      // `[object Object]`. Use message/stack when available, fall back to
+      // String() for anything else.
+      const msg = e instanceof Error ? e.message : String(e);
+      setError(`Rename failed: ${msg}`);
     } finally {
       setBusy(false);
     }
@@ -68,7 +72,8 @@ export function TagManager({
       }
       await onChanged();
     } catch (e: unknown) {
-      setError(`Delete failed: ${e}`);
+      const msg = e instanceof Error ? e.message : String(e);
+      setError(`Delete failed: ${msg}`);
     } finally {
       setBusy(false);
     }

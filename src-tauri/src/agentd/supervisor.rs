@@ -228,9 +228,7 @@ mod tests {
         // binary in a unit test would couple the test to the build
         // tree.) This validates the connect-success path without
         // depending on the spawn path.
-        let engine = std::sync::Arc::new(
-            crate::agentd::engine::Engine::new(log_dir).unwrap(),
-        );
+        let engine = std::sync::Arc::new(crate::agentd::engine::Engine::new(log_dir).unwrap());
         let listener = tokio::net::UnixListener::bind(&sock).unwrap();
         let engine_clone = engine.clone();
         let server = tokio::spawn(async move {

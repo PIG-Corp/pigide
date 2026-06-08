@@ -44,6 +44,58 @@ pub struct CreatePresetArgs {
     pub cwd: Option<String>,
 }
 
+/// SSH `-o` directives that turn a connection into local or remote command
+/// execution. Allowing the webview to store these in a preset's argv would
+/// make any UI compromise an RCE primitive (`ssh -o ProxyCommand=...` runs
+/// the command locally before connecting). We reject presets carrying them.
+const FORBIDDEN_SSH_OPTIONS: &[&str] = &[
+    "proxycommand",
+    "localcommand",
+    "permitlocalcommand",
+    "remotecommand",
+];
+
+/// Reject argv that smuggles a command-execution `-o` directive. Handles the
+/// `-o Name=val`, `-oName=val`, and `-o Name val` spellings (case-insensitive
+/// option name, as ssh treats them). Also rejects the standalone
+/// `-o`-less long forms some shells accept.
+pub fn validate_ssh_args(args: &[String]) -> Result<()> {
+    // Collect option payloads: anything after a bare `-o`, plus the tail of
+    // any `-oXXX` token.
+    let mut expect_option_value = false;
+    for raw in args {
+        let tok = raw.trim();
+        let payload: Option<&str> = if expect_option_value {
+            expect_option_value = false;
+            Some(tok)
+        } else if tok == "-o" {
+            expect_option_value = true;
+            None
+        } else if let Some(rest) = tok.strip_prefix("-o") {
+            Some(rest)
+        } else {
+            // Catch the directive name appearing anywhere in a token, e.g. a
+            // crafted `--someflag=ProxyCommand=...`.
+            Some(tok)
+        };
+        if let Some(p) = payload {
+            let name = p
+                .split(|c| c == '=' || c == ' ')
+                .next()
+                .unwrap_or("")
+                .trim()
+                .to_ascii_lowercase();
+            if FORBIDDEN_SSH_OPTIONS.contains(&name.as_str()) {
+                return Err(Error::Invalid(format!(
+                    "ssh option '{}' is not allowed (command execution)",
+                    name
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
 fn from_row(row: &rusqlite::Row) -> rusqlite::Result<SshPreset> {
     let args_json: String = row.get(6)?;
     let args: Vec<String> = serde_json::from_str(&args_json).unwrap_or_default();
@@ -69,6 +121,7 @@ pub fn create(db: &DbPool, args: CreatePresetArgs) -> Result<SshPreset> {
     if args.host.trim().is_empty() {
         return Err(Error::Invalid("host required".into()));
     }
+    validate_ssh_args(&args.args)?;
     let id = Uuid::new_v4().to_string();
     let ts = Utc::now().to_rfc3339();
     let args_json = serde_json::to_string(&args.args)?;
@@ -170,6 +223,9 @@ pub fn spawn_preset(
     preset_id: &str,
 ) -> Result<Agent> {
     let preset = get(db, preset_id)?;
+    // Defence in depth: reject command-execution options even if a preset
+    // carrying them somehow reached the DB (older row, direct write).
+    validate_ssh_args(&preset.args)?;
     let argv = build_argv(&preset);
     mgr.spawn_with_args(workspace_id, AgentType::Ssh, preset.cwd.clone(), argv)
 }
@@ -321,5 +377,51 @@ mod tests {
             .unwrap_err(),
             Error::Invalid(_)
         ));
+    }
+
+    #[test]
+    fn validate_ssh_args_allows_benign_flags() {
+        assert!(validate_ssh_args(&[]).is_ok());
+        assert!(validate_ssh_args(&[
+            "-L".into(),
+            "8080:localhost:80".into(),
+            "-o".into(),
+            "StrictHostKeyChecking=no".into(),
+        ])
+        .is_ok());
+        assert!(validate_ssh_args(&["-vvv".into(), "-A".into()]).is_ok());
+    }
+
+    #[test]
+    fn validate_ssh_args_blocks_proxycommand_spellings() {
+        // `-o ProxyCommand=...`
+        assert!(validate_ssh_args(&["-o".into(), "ProxyCommand=sh -c id".into()]).is_err());
+        // `-oProxyCommand=...`
+        assert!(validate_ssh_args(&["-oProxyCommand=evil".into()]).is_err());
+        // case-insensitive + `-o Name val`
+        assert!(validate_ssh_args(&["-o".into(), "proxycommand /tmp/x".into()]).is_err());
+    }
+
+    #[test]
+    fn validate_ssh_args_blocks_local_and_remote_command() {
+        assert!(validate_ssh_args(&["-o".into(), "LocalCommand=touch /tmp/x".into()]).is_err());
+        assert!(validate_ssh_args(&["-o".into(), "PermitLocalCommand=yes".into()]).is_err());
+        assert!(validate_ssh_args(&["-o".into(), "RemoteCommand=rm -rf /".into()]).is_err());
+    }
+
+    #[test]
+    fn create_rejects_proxycommand_preset() {
+        let p = pool();
+        let err = create(
+            &p,
+            CreatePresetArgs {
+                name: "evil".into(),
+                host: "h".into(),
+                args: vec!["-o".into(), "ProxyCommand=sh -c id".into()],
+                ..Default::default()
+            },
+        )
+        .unwrap_err();
+        assert!(matches!(err, Error::Invalid(_)));
     }
 }

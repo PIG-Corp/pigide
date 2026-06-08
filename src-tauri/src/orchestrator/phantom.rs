@@ -199,10 +199,7 @@ mod tests {
 
     #[test]
     fn detects_calling_tools_preamble_without_tools() {
-        assert!(is_phantom(
-            "Calling tools:\n  - send_to_agent(...)",
-            false
-        ));
+        assert!(is_phantom("Calling tools:\n  - send_to_agent(...)", false));
         assert!(is_phantom("вызываю тулзы:\n  - update_task(...)", false));
         assert!(is_phantom("Tool_use: spawn_agent", false));
     }
@@ -211,10 +208,7 @@ mod tests {
     fn calling_tools_preamble_ok_when_tools_actually_emitted() {
         // Real tool_calls present → not phantom even if model also wrote
         // the noisy preamble (we strip it elsewhere; we don't reject here).
-        assert!(!is_phantom(
-            "Calling tools:\n  - send_to_agent(...)",
-            true
-        ));
+        assert!(!is_phantom("Calling tools:\n  - send_to_agent(...)", true));
     }
 
     #[test]
@@ -246,8 +240,7 @@ mod tests {
 
     #[test]
     fn append_event_writes_jsonl_line() {
-        let dir = std::env::temp_dir()
-            .join(format!("pigide-phantom-{}", uuid::Uuid::new_v4()));
+        let dir = std::env::temp_dir().join(format!("pigide-phantom-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         let ev = PhantomEvent::new("kr/claude-opus-4.7", "I'll send", true, true);
         append_event(&dir, &ev);

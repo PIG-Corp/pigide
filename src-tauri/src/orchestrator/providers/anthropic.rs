@@ -25,6 +25,92 @@ use rand::Rng;
 use serde_json::{json, Value};
 use std::time::Duration;
 
+/// Strip model-emitted reasoning blocks (`` … ``
+/// and Qwen's `<|thinking|>` … `<|/thinking|>`) from a text fragment.
+///
+/// Many OpenAI-compatible providers (Qwen, DeepSeek, Kimi, GLM, …) emit
+/// chain-of-thought as raw `delta.content` text instead of a separate
+/// `reasoning_content` channel. Without this filter, that prose leaks
+/// verbatim into the chat bubble and into the persisted assistant message —
+/// which then re-feeds itself on the next turn and reinforces the behaviour,
+/// making the model *look* as if it had no system prompt.
+///
+/// We strip both flavours at the streaming boundary so the deltas the user
+/// sees, the assembled final text, and the round-tripped history all stay
+/// free of reasoning prose. Returns the (possibly empty) visible text.
+pub fn strip_reasoning(s: &str) -> String {
+    if s.is_empty() {
+        return String::new();
+    }
+    if !s.contains("<think>") && !s.contains("<|thinking|>") {
+        return s.to_string();
+    }
+    let mut out = String::with_capacity(s.len());
+    let mut rest = s;
+    loop {
+        let open_a = rest.find("<think>");
+        let open_b = rest.find("<|thinking|>");
+        let (open_pos, open_len, close_marker) = match (open_a, open_b) {
+            (Some(a), Some(b)) if a <= b => (a, "<think>".len(), "</think>"),
+            (Some(_a), Some(b)) => (b, "<|thinking|>".len(), "<|/thinking|>"),
+            (Some(a), None) => (a, "<think>".len(), "</think>"),
+            (None, Some(b)) => (b, "<|thinking|>".len(), "<|/thinking|>"),
+            (None, None) => break,
+        };
+        out.push_str(&rest[..open_pos]);
+        rest = &rest[open_pos + open_len..];
+        match rest.find(close_marker) {
+            Some(close) => rest = &rest[close + close_marker.len()..],
+            None => {
+                // Unterminated reasoning block — drop the rest. A model that
+                // opens one and forgets to close it is streaming a
+                // half-reasoning payload; better to truncate the visible
+                // bubble than to leak the rest of the turn.
+                rest = "";
+                break;
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+#[cfg(test)]
+mod reasoning_tests {
+    use super::strip_reasoning;
+
+    #[test]
+    fn passthrough_when_no_marker() {
+        assert_eq!(strip_reasoning("hello world"), "hello world");
+    }
+
+    #[test]
+    fn strips_think_block() {
+        assert_eq!(
+            strip_reasoning("before<think>secret reasoning</think>after"),
+            "beforeafter"
+        );
+    }
+
+    #[test]
+    fn strips_qwen_thinking_block() {
+        assert_eq!(strip_reasoning("a<|thinking|>x<|/thinking|>b"), "ab");
+    }
+
+    #[test]
+    fn drops_unterminated_block() {
+        assert_eq!(strip_reasoning("safe<think>lost"), "safe");
+    }
+
+    #[test]
+    fn keeps_multiple_outside_thinks() {
+        assert_eq!(
+            strip_reasoning("x<think>1</think> y<think>2</think> z"),
+            "x y z"
+        );
+    }
+}
+
 /// Anthropic API version pinned for compatibility. Bump intentionally.
 const API_VERSION: &str = "2023-06-01";
 
@@ -75,7 +161,8 @@ impl AnthropicProvider {
 
     /// Build the JSON body for one streaming request against `model`.
     fn build_body(&self, model: &str, req: &ChatRequest) -> Result<Value> {
-        let (system_blocks, body_messages) = translate_messages(&req.messages, req.cache && self.cache)?;
+        let (system_blocks, body_messages) =
+            translate_messages(&req.messages, req.cache && self.cache)?;
         let mut body = json!({
             "model": model,
             "max_tokens": req.max_tokens.max(1),
@@ -100,10 +187,9 @@ impl AnthropicProvider {
         req: &ChatRequest,
         delta_tx: &DeltaTx,
     ) -> Result<ChatRespMessage> {
-        let api_key = self
-            .api_key
-            .as_deref()
-            .ok_or_else(|| Error::Orchestrator("anthropic: missing API key (set ANTHROPIC_API_KEY)".into()))?;
+        let api_key = self.api_key.as_deref().ok_or_else(|| {
+            Error::Orchestrator("anthropic: missing API key (set ANTHROPIC_API_KEY)".into())
+        })?;
 
         let body = self.build_body(model, req)?;
         tracing::debug!("anthropic -> {}: model={}", self.endpoint(), model);
@@ -136,8 +222,8 @@ impl AnthropicProvider {
         let mut parser = StreamState::default();
 
         while let Some(chunk) = stream.next().await {
-            let bytes = chunk
-                .map_err(|e| Error::Orchestrator(format!("anthropic stream: {}", e)))?;
+            let bytes =
+                chunk.map_err(|e| Error::Orchestrator(format!("anthropic stream: {}", e)))?;
             buf.push_str(&String::from_utf8_lossy(&bytes));
             // SSE events are separated by blank lines.
             while let Some(end) = buf.find("\n\n") {
@@ -222,11 +308,7 @@ impl LlmProvider for AnthropicProvider {
         self.fallback_model.as_deref()
     }
 
-    async fn chat_stream(
-        &self,
-        req: ChatRequest,
-        delta_tx: DeltaTx,
-    ) -> Result<ChatRespMessage> {
+    async fn chat_stream(&self, req: ChatRequest, delta_tx: DeltaTx) -> Result<ChatRespMessage> {
         self.stream_with_retry(&req, &delta_tx).await
     }
 
@@ -271,10 +353,7 @@ impl LlmProvider for AnthropicProvider {
 /// `(system, messages)` pair. Caching: when `cache=true`, the static head of
 /// the system prompt (everything up to `WORLD_STATE_MARKER`) is wrapped as a
 /// cache-controlled content block.
-pub fn translate_messages(
-    messages: &[Value],
-    cache: bool,
-) -> Result<(Option<Value>, Vec<Value>)> {
+pub fn translate_messages(messages: &[Value], cache: bool) -> Result<(Option<Value>, Vec<Value>)> {
     let mut system: Option<String> = None;
     let mut out: Vec<Value> = Vec::with_capacity(messages.len());
 
@@ -304,7 +383,11 @@ pub fn translate_messages(
                 }
                 if let Some(tcs) = m.get("tool_calls").and_then(|v| v.as_array()) {
                     for tc in tcs {
-                        let id = tc.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                        let id = tc
+                            .get("id")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
                         let func = tc.get("function").cloned().unwrap_or(Value::Null);
                         let name = func
                             .get("name")
@@ -412,10 +495,7 @@ pub fn translate_tools(tools: &[Value], cache: bool) -> Result<Value> {
     if cache {
         if let Some(last) = out.last_mut() {
             if let Some(obj) = last.as_object_mut() {
-                obj.insert(
-                    "cache_control".into(),
-                    json!({"type": "ephemeral"}),
-                );
+                obj.insert("cache_control".into(), json!({"type": "ephemeral"}));
             }
         }
     }
@@ -487,8 +567,8 @@ struct BlockAccum {
     kind: String, // "text" | "tool_use"
     id: String,
     name: String,
-    text: String,        // for text blocks
-    input_json: String,  // accumulated partial_json for tool_use
+    text: String,       // for text blocks
+    input_json: String, // accumulated partial_json for tool_use
 }
 
 impl StreamState {
@@ -501,7 +581,10 @@ impl StreamState {
 
     fn into_response(self) -> ChatRespMessage {
         let mut tool_calls: Vec<ToolCall> = Vec::new();
-        let mut text = self.text;
+        // Defensive: strip any reasoning blocks that were only fully
+        // visible after the final delta landed. Cheap re-pass — usually
+        // a no-op because the streaming path already filtered.
+        let mut text = strip_reasoning(&self.text);
 
         for b in self.blocks {
             match b.kind.as_str() {
@@ -571,7 +654,11 @@ where
     };
     let typ = event_name
         .map(|s| s.to_string())
-        .or_else(|| json.get("type").and_then(|v| v.as_str()).map(|s| s.to_string()))
+        .or_else(|| {
+            json.get("type")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+        })
         .unwrap_or_default();
 
     match typ.as_str() {
@@ -609,15 +696,23 @@ where
                 .to_string();
             match dtyp.as_str() {
                 "text_delta" => {
-                    let t = delta.get("text").and_then(|v| v.as_str()).unwrap_or("");
+                    let raw = delta.get("text").and_then(|v| v.as_str()).unwrap_or("");
+                    // Strip any model-emitted reasoning so it never reaches
+                    // the chat bubble or the persisted assistant message.
+                    let t = strip_reasoning(raw);
                     if !t.is_empty() {
-                        state.text.push_str(t);
+                        state.text.push_str(&t);
                         let entry = state.ensure_block(idx);
                         if entry.kind.is_empty() {
                             entry.kind = "text".into();
                         }
-                        entry.text.push_str(t);
-                        on_text(t);
+                        entry.text.push_str(&t);
+                        on_text(&t);
+                    } else if raw.contains("<think>") || raw.contains("<|thinking|>") {
+                        // Pure-reasoning delta: still let it accumulate so
+                        // the trimmer catches a half-opened block on the
+                        // next delta, but emit nothing to the UI.
+                        state.text.push_str(raw);
                     }
                 }
                 "input_json_delta" => {
@@ -678,10 +773,7 @@ mod tests {
 
     #[test]
     fn translate_caches_static_system_head() {
-        let s = format!(
-            "stable head{}dynamic tail",
-            super::WORLD_STATE_MARKER
-        );
+        let s = format!("stable head{}dynamic tail", super::WORLD_STATE_MARKER);
         let msgs = vec![
             json!({"role": "system", "content": s}),
             json!({"role": "user", "content": "hi"}),

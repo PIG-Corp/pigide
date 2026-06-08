@@ -24,7 +24,7 @@
 
   **→ <a href="https://kroch228.github.io/pigide-landing/">View the live landing page</a>**
 
-  <sub>See <a href="docs/superpowers/specs/2026-05-14-pigide-design.md"><code>docs/superpowers/specs/2026-05-14-pigide-design.md</code></a> for the full design.</sub>
+
 
 </div>
 
@@ -47,86 +47,7 @@ Once the window is open:
 
 For voice: hold the configured PTT hotkey (off by default — bind in `Settings → Voice`) and speak. Partials stream into the focused input within 300 ms.
 
-<br/>
 
-## What's inside
-
-<table>
-<tr>
-<td width="50%" valign="top">
-<img src=".github/readme/screens/swarm.png" alt="Swarm orchestration" width="100%"/>
-<br/><br/>
-
-### `01 / Swarm` &nbsp;Orchestration
-
-Coordinate a roster of specialised agents — `aider`, `claude`, `opencode`, `devin`, `agy`, `codex` — each in a tiled terminal pane. Roles: orchestrator, builder, reviewer, scout. You speak, the layout reacts.
-
-`tiled panes` · `role routing` · `live layout`
-
-</td>
-<td width="50%" valign="top">
-<img src=".github/readme/screens/workflow.png" alt="Autonomous workflow" width="100%"/>
-<br/><br/>
-
-### `02 / Workflow` &nbsp;Autonomous
-
-Built-in task state machine, file locks, and review gates with quorum voting keep the swarm aligned and code pristine across multiple agents working the same repo.
-
-`state machine` · `file locks` · `quorum gates`
-
-</td>
-</tr>
-<tr>
-<td width="50%" valign="top">
-<img src=".github/readme/screens/pigvoice.png" alt="PigVoice" width="100%"/>
-<br/><br/>
-
-### `03 / Voice` &nbsp;Sub-300 ms
-
-Speak in plain language. Local STT streams partials to the orchestrator while you're still talking. No round-trip to the cloud.
-
-`local STT` · `streaming` · `VAD`
-
-</td>
-<td width="50%" valign="top">
-<img src=".github/readme/screens/memory.png" alt="Workspace memory" width="100%"/>
-<br/><br/>
-
-### `04 / Memory` &nbsp;Workspace
-
-Conversations, decisions, and artifacts persist per workspace. Agents recall context across restarts; you keep the receipts.
-
-`SQLite` · `per-workspace` · `structured`
-
-</td>
-</tr>
-<tr>
-<td width="50%" valign="top">
-<img src=".github/readme/screens/watcher.png" alt="Background watcher" width="100%"/>
-<br/><br/>
-
-### `05 / Watcher` &nbsp;Background
-
-A seamless supervisor on Gemini Flash-Lite that monitors agent stdout, classifies events, and intelligently escalates blockers to human review without hanging the swarm.
-
-`Gemini` · `stdout classify` · `human escalate`
-
-</td>
-<td width="50%" valign="top">
-<img src=".github/readme/screens/skills.png" alt="Extensible skills" width="100%"/>
-<br/><br/>
-
-### `06 / Skills` &nbsp;Extensible
-
-Dynamic Architect prompt-modules. Auto-discovered YAML definitions, hot-reloading context injections, tailored per turn. Your prompts become a system.
-
-`YAML` · `hot-reload` · `per-turn inject`
-
-</td>
-</tr>
-</table>
-
-<br/>
 
 <div align="center">
   <img src=".github/readme/stats.svg" alt="6 agent runtimes · 300 ms voice latency · 120k GPU particles · 100% local" width="100%"/>
@@ -223,7 +144,7 @@ PIGIDE_GPU=cpu     ./scripts/build.sh   # CPU-only
 
 The Kiro orchestrator runs against a swappable LLM backend. Default is the **Anthropic Messages API** with **Claude Opus 4.5** as primary and **Claude Opus 4** as automatic fallback on `5xx` / `529` / timeout. Set `ANTHROPIC_API_KEY` in the environment, or paste a key into `Right pane → Settings → API key`.
 
-OmniRouter (OpenAI-compatible) remains available — switch via `Right pane → Settings → Provider`. See [`docs/architect-model.md`](docs/architect-model.md) for the full feature list (streaming, tool calls, prompt caching, fallback policy).
+OmniRouter (OpenAI-compatible) remains available — switch via `Right pane → Settings → Provider`.
 
 <br/>
 
@@ -379,7 +300,7 @@ Five built-ins ship by default — including `user-skill-prompt-engineer`, the m
 
 The Architect prompt itself (`src-tauri/src/orchestrator/prompt.rs`, v2 — gold-standard meta-prompting; v1 archived alongside as `prompt.v1.rs`) drives every turn through a deterministic 8-step pipeline: **intent → contract** (role / goal / exit_criteria) → **skill selection** → **memory grounding** → **decomposition** (Plan-and-Solve / Least-to-Most) → **draft** (via `[[user-skill-prompt-engineer]]`) → **self-critique** (Self-Refine + Chain-of-Verification) → **dispatch** (parallel where independent) → **observe + self-improve** (`create_memory` for new patterns). Research citations are at the top of `prompt.rs`.
 
-See [`docs/skills.md`](docs/skills.md) for the author guide and [`SKILLS_DESIGN.md`](SKILLS_DESIGN.md) for the design.
+See the built-in skills in `src-tauri/resources/skills/` for examples.
 
 ```bash
 # unit tests (parser, router, composer, registry)

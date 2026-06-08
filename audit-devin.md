@@ -17,9 +17,9 @@ This audit reviewed the PigIDE Rust/Tauri backend, React frontend, MCP server, a
 
 | Check | Result | Notes |
 |---|---|---|
-| `cargo test --manifest-path /home/camer/pigide/src-tauri/Cargo.toml --no-default-features --features custom-protocol` | Failed | 258 passed, 4 failed: FTS hyphen tests, SSE parser test, Claude skill import idempotency test |
-| `pnpm --dir /home/camer/pigide/frontend build` | Passed | Build succeeds; Vite reports a large chunk warning for `index-*.js` |
-| `pnpm --dir /home/camer/pigide/frontend lint` | Failed | 17 ESLint errors across memory/skills/voice/settings components |
+| `cargo test --manifest-path ./src-tauri/Cargo.toml --no-default-features --features custom-protocol` | Failed | 258 passed, 4 failed: FTS hyphen tests, SSE parser test, Claude skill import idempotency test |
+| `pnpm --dir ./frontend build` | Passed | Build succeeds; Vite reports a large chunk warning for `index-*.js` |
+| `pnpm --dir ./frontend lint` | Failed | 17 ESLint errors across memory/skills/voice/settings components |
 | Secret-pattern scan with `rg` | Passed | No matches for common API key/private key patterns outside ignored build artifacts |
 
 ## Findings
@@ -118,9 +118,9 @@ This audit reviewed the PigIDE Rust/Tauri backend, React frontend, MCP server, a
 Run and require the following before marking the project production-ready:
 
 ```bash
-cargo test --manifest-path /home/camer/pigide/src-tauri/Cargo.toml --no-default-features --features custom-protocol
-pnpm --dir /home/camer/pigide/frontend lint
-pnpm --dir /home/camer/pigide/frontend build
+cargo test --manifest-path ./src-tauri/Cargo.toml --no-default-features --features custom-protocol
+pnpm --dir ./frontend lint
+pnpm --dir ./frontend build
 rg -n "(?i)(api[_-]?key|secret|token|password)\s*[:=]\s*['\"][^'\"]{8,}|pk_[A-Za-z0-9_-]{20,}|ghp_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16}|BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY" /home/camer/pigide -g '!target' -g '!frontend/node_modules' -g '!frontend/dist'
 ```
 

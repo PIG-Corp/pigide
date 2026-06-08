@@ -8,6 +8,7 @@
 
 pub mod anthropic;
 pub mod omni;
+pub mod registry;
 
 use crate::chat::ToolCall;
 use crate::db::{self, DbPool};
@@ -65,11 +66,7 @@ pub trait LlmProvider: Send + Sync {
     fn primary_model(&self) -> &str;
     fn fallback_model(&self) -> Option<&str>;
 
-    async fn chat_stream(
-        &self,
-        req: ChatRequest,
-        delta_tx: DeltaTx,
-    ) -> Result<ChatRespMessage>;
+    async fn chat_stream(&self, req: ChatRequest, delta_tx: DeltaTx) -> Result<ChatRespMessage>;
 
     async fn ping(&self) -> Result<PingInfo>;
 }
@@ -93,8 +90,9 @@ pub const KEY_OMNI_API_KEY: &str = "omnirouter.api_key";
 pub const DEFAULT_ARCH_MODEL: &str = "claude-opus-4-5";
 pub const DEFAULT_ARCH_FALLBACK: &str = "claude-opus-4";
 pub const DEFAULT_ANTHROPIC_BASE: &str = "https://api.anthropic.com";
+pub const DEFAULT_OPENAI_BASE: &str = "https://api.openai.com";
 pub const DEFAULT_OMNI_BASE: &str = "http://localhost:20128";
-pub const DEFAULT_OMNI_MODEL: &str = "kr/claude-opus-4.7";
+pub const DEFAULT_OMNI_MODEL: &str = "kr/claude-opus-4.8";
 
 /// Resolve the Anthropic API key in priority order: env > setting.
 pub fn resolve_anthropic_key(db: &DbPool) -> Option<String> {
@@ -109,8 +107,17 @@ pub fn resolve_anthropic_key(db: &DbPool) -> Option<String> {
         .filter(|s| !s.trim().is_empty())
 }
 
-/// Build the active provider. Hardcoded to OmniRouter with kr/claude-opus-4.7.
-pub fn build_provider(_db: &DbPool) -> Arc<dyn LlmProvider> {
+/// Build the active provider — the gateway entry point.
+///
+/// Routing order:
+/// 1. If a custom provider is registered + marked active + has a model, all
+///    chat flows through it (OpenAI-compat → [`omni`], Anthropic →
+///    [`anthropic`]). The adapter normalizes the request/response shape.
+/// 2. Otherwise fall back to the built-in OmniRouter default.
+pub fn build_provider(db: &DbPool) -> Arc<dyn LlmProvider> {
+    if let Some(p) = registry::active_provider(db) {
+        return p;
+    }
     Arc::new(omni::OmniProvider::new(
         DEFAULT_OMNI_BASE.to_string(),
         DEFAULT_OMNI_MODEL.to_string(),
@@ -136,7 +143,7 @@ mod tests {
     }
 
     #[test]
-    fn build_provider_uses_omnirouter_kr() {
+    fn build_provider_defaults_to_omnirouter_kr() {
         let db = temp_pool();
         let p = build_provider(&db);
         assert_eq!(p.label(), "omnirouter");
@@ -144,10 +151,10 @@ mod tests {
     }
 
     #[test]
-    fn provider_ignores_settings() {
+    fn build_provider_falls_back_when_no_active_custom() {
+        // No active provider pointer set → built-in default.
         let db = temp_pool();
-        db::set_setting(&db, KEY_PROVIDER, "anthropic").unwrap();
-        db::set_setting(&db, KEY_ARCH_MODEL, "claude-opus-4-5").unwrap();
+        db::set_setting(&db, registry::KEY_ACTIVE_PROVIDER, "").unwrap();
         let p = build_provider(&db);
         assert_eq!(p.primary_model(), DEFAULT_OMNI_MODEL);
     }

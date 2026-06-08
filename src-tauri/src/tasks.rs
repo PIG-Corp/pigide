@@ -217,6 +217,11 @@ impl TaskManager {
         let title = args.title.unwrap_or(cur.title.clone());
         let instructions = args.instructions.unwrap_or(cur.instructions.clone());
         let knowledge = args.knowledge.unwrap_or(cur.knowledge.clone());
+        // Whether this transition retires the task and should drop its file
+        // locks. We compute the flag here but only RELEASE after the UPDATE
+        // succeeds — releasing first risks dropping locks while the status
+        // change fails, leaving the task unchanged yet unlocked.
+        let mut release_locks = false;
         let status = match args.status {
             Some(s) => {
                 TaskStatus::parse(&s)
@@ -230,7 +235,7 @@ impl TaskManager {
                     crate::swarm::review::task_completable(&self.db, &args.id)?;
                 }
                 if (s == "cancelled" || s == "complete") && cur.status != s {
-                    let _ = crate::swarm::ownership::release_all_for_task(&self.db, &args.id);
+                    release_locks = true;
                 }
                 s
             }
@@ -256,6 +261,10 @@ impl TaskManager {
                 &updated_at,
             ],
         )?;
+        // Status change committed — now it's safe to drop the locks.
+        if release_locks {
+            let _ = crate::swarm::ownership::release_all_for_task(&self.db, &args.id);
+        }
         Ok(Task {
             id: cur.id,
             workspace_id: cur.workspace_id,

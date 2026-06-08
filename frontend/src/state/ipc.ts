@@ -15,6 +15,8 @@ import type {
   PathAttachment,
   PathSuggestion,
   Prompt,
+  ProviderView,
+  ModelEntry,
   QueueItem,
   QueueSnapshot,
   RolePromptOverride,
@@ -125,9 +127,12 @@ export const ipc = {
   providerInfo: () =>
     invoke<{
       provider: string;
+      kind: string;
       primary_model: string;
       fallback_model: string | null;
       has_api_key: boolean;
+      custom_label: string | null;
+      base_url: string | null;
     }>("provider_info"),
   providerTestConnection: () =>
     invoke<{
@@ -136,6 +141,34 @@ export const ipc = {
       ok: boolean;
       note: string | null;
     }>("provider_test_connection"),
+
+  // ---------- Custom API providers ----------
+  providerList: () => invoke<ProviderView[]>("provider_list"),
+  providerCreate: (args: {
+    label: string;
+    kind: "openai" | "anthropic";
+    base_url: string;
+    api_key?: string;
+  }) => invoke<ProviderView>("provider_create", { args }),
+  providerUpdate: (args: {
+    id: string;
+    label: string;
+    base_url: string;
+    model?: string;
+    api_key?: string;
+  }) => invoke<ProviderView>("provider_update", { args }),
+  providerDelete: (id: string) => invoke<void>("provider_delete", { id }),
+  providerSetModel: (id: string, model: string) =>
+    invoke<ProviderView>("provider_set_model", { args: { id, model } }),
+  providerSetActive: (id: string) =>
+    invoke<void>("provider_set_active", { id }),
+  providerFetchModels: (id: string) =>
+    invoke<ModelEntry[]>("provider_fetch_models", { id }),
+  providerProbeModels: (args: {
+    kind: "openai" | "anthropic";
+    base_url: string;
+    api_key?: string;
+  }) => invoke<ModelEntry[]>("provider_probe_models", { args }),
 
   createTask: (args: {
     workspace_id: string;
@@ -567,5 +600,16 @@ export function onMemoryNoteCreated(
   cb: (e: MemoryNoteCreatedEvent) => void,
 ): Promise<UnlistenFn> {
   return listen<MemoryNoteCreatedEvent>("memory://note.created", (e) => cb(e.payload));
+}
+
+// ---------- Provider changes ----------
+
+/// Fired by the backend whenever the active provider pointer, its model
+/// string, or any of its row fields change. Subscribers re-fetch
+/// `providerInfo` to refresh the chat header badge.
+export function onProviderChanged(
+  cb: () => void,
+): Promise<UnlistenFn> {
+  return listen<void>("provider://changed", () => cb());
 }
 

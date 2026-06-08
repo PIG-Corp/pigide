@@ -61,7 +61,9 @@ pub fn read_frame_blocking<R: BufRead>(r: &mut R) -> io::Result<Option<String>> 
         if buf.len() > MAX_FRAME_BYTES {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
-                FrameTooLarge { bytes_read: buf.len() },
+                FrameTooLarge {
+                    bytes_read: buf.len(),
+                },
             ));
         }
         // Strip the trailing newline (and CR if present).
@@ -124,7 +126,9 @@ where
         if buf.len() > MAX_FRAME_BYTES {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
-                FrameTooLarge { bytes_read: buf.len() },
+                FrameTooLarge {
+                    bytes_read: buf.len(),
+                },
             ));
         }
         if buf.ends_with('\n') {
@@ -189,9 +193,18 @@ mod tests {
     fn pipelined_frames_decode_in_order() {
         let buf = b"{\"id\":1}\n{\"id\":2}\n{\"id\":3}\n";
         let mut r = BufReader::new(Cursor::new(buf.to_vec()));
-        assert_eq!(read_frame_blocking(&mut r).unwrap().as_deref(), Some("{\"id\":1}"));
-        assert_eq!(read_frame_blocking(&mut r).unwrap().as_deref(), Some("{\"id\":2}"));
-        assert_eq!(read_frame_blocking(&mut r).unwrap().as_deref(), Some("{\"id\":3}"));
+        assert_eq!(
+            read_frame_blocking(&mut r).unwrap().as_deref(),
+            Some("{\"id\":1}")
+        );
+        assert_eq!(
+            read_frame_blocking(&mut r).unwrap().as_deref(),
+            Some("{\"id\":2}")
+        );
+        assert_eq!(
+            read_frame_blocking(&mut r).unwrap().as_deref(),
+            Some("{\"id\":3}")
+        );
         assert!(read_frame_blocking(&mut r).unwrap().is_none());
     }
 
@@ -199,7 +212,10 @@ mod tests {
     fn blank_and_comment_lines_skipped() {
         let buf = b"\n# comment\n  \n{\"id\":7}\n# trailing\n";
         let mut r = BufReader::new(Cursor::new(buf.to_vec()));
-        assert_eq!(read_frame_blocking(&mut r).unwrap().as_deref(), Some("{\"id\":7}"));
+        assert_eq!(
+            read_frame_blocking(&mut r).unwrap().as_deref(),
+            Some("{\"id\":7}")
+        );
         // After the data line, comments are skipped and we hit EOF.
         assert!(read_frame_blocking(&mut r).unwrap().is_none());
     }
@@ -208,7 +224,10 @@ mod tests {
     fn crlf_terminator_stripped() {
         let buf = b"{\"id\":1}\r\n";
         let mut r = BufReader::new(Cursor::new(buf.to_vec()));
-        assert_eq!(read_frame_blocking(&mut r).unwrap().as_deref(), Some("{\"id\":1}"));
+        assert_eq!(
+            read_frame_blocking(&mut r).unwrap().as_deref(),
+            Some("{\"id\":1}")
+        );
     }
 
     #[test]

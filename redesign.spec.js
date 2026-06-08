@@ -16,7 +16,7 @@ test('capture screenshots', async ({ page }) => {
   const panel = page.locator('.right-pane-bridge');
   await page.waitForTimeout(1000);
   console.log("Taking dark theme screenshot (Target)...");
-  await panel.screenshot({ path: '/home/camer/pigide/target_dark_screenshot.png' });
+  await panel.screenshot({ path: './target_dark_screenshot.png' });
   
   // Open Theme Picker
   console.log("Opening theme picker...");

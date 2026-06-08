@@ -10,6 +10,7 @@ import {
 import { useStore } from "../state/store";
 import { ipc } from "../state/ipc";
 import type { Agent, Task } from "../state/types";
+import { stripControl } from "../lib/stripControl";
 
 /**
  * MentionTextarea — drop-in textarea with `@…` autocomplete (BridgeSpace gap
@@ -85,6 +86,9 @@ export const MentionTextarea = forwardRef<MentionTextareaHandle, MentionTextarea
     const [trigger, setTrigger] = useState<{ start: number; query: string } | null>(null);
     const [tasks, setTasks] = useState<Task[]>([]);
     const [activeIdx, setActiveIdx] = useState(0);
+    // B-8.2: stable id prefix for the listbox + option ids so the
+    // textarea can advertise which option is "active" to screen readers.
+    const listboxId = `mtn-listbox`;
 
     useImperativeHandle(ref, () => ({
       focus: () => taRef.current?.focus(),
@@ -195,10 +199,23 @@ export const MentionTextarea = forwardRef<MentionTextareaHandle, MentionTextarea
     };
 
     const onChangeInternal = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-      const next = e.target.value;
-      onChange(next);
+      // Strip stray terminal control sequences (xterm focus reports,
+      // DECRQM mode reports, buffered arrow / Shift-Tab bytes) that can
+      // land in the textarea when focus moves between tiles under Tauri
+      // WebView2. The caret may shift if leading bytes were dropped; if
+      // so, restore the caret to the new end-of-prefix position.
+      const raw = e.target.value;
+      const clean = stripControl(raw);
+      if (clean !== raw) {
+        const caret = e.target.selectionStart ?? raw.length;
+        const delta = raw.length - clean.length;
+        e.target.value = clean;
+        const nextCaret = Math.max(0, caret - delta);
+        e.target.setSelectionRange(nextCaret, nextCaret);
+      }
+      onChange(clean);
       const caret = e.target.selectionStart;
-      setTrigger(findTrigger(next, caret));
+      setTrigger(findTrigger(clean, caret));
     };
 
     return (
@@ -215,13 +232,26 @@ export const MentionTextarea = forwardRef<MentionTextareaHandle, MentionTextarea
             const ta = e.currentTarget;
             setTrigger(findTrigger(ta.value, ta.selectionStart));
           }}
+          // B-8.2: ARIA combobox wiring. The textarea acts as the
+          // combobox input; the listbox below it is the popup. Screen
+          // readers announce the option pointed to by `aria-activedescendant`.
+          role="combobox"
+          aria-autocomplete="list"
+          aria-expanded={trigger !== null && suggestions.length > 0}
+          aria-controls={trigger !== null && suggestions.length > 0 ? listboxId : undefined}
+          aria-activedescendant={
+            trigger !== null && suggestions.length > 0
+              ? `${listboxId}-${activeIdx}`
+              : undefined
+          }
           rows={rows}
         />
         {trigger && suggestions.length > 0 && (
-          <div className="mention-pop" role="listbox">
+          <div className="mention-pop" id={listboxId} role="listbox">
             {suggestions.map((s, i) => (
               <button
                 key={`${s.kind}:${s.id}`}
+                id={`${listboxId}-${i}`}
                 role="option"
                 aria-selected={i === activeIdx}
                 className={`mention-item ${i === activeIdx ? "active" : ""}`}

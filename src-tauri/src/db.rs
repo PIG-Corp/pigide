@@ -5,6 +5,28 @@ use std::path::PathBuf;
 
 pub type DbPool = Pool<SqliteConnectionManager>;
 
+/// Run a blocking closure on the tokio blocking pool, returning its
+/// result as an `async` future. Use this for any synchronous I/O (rusqlite,
+/// std::fs, regex) called from an `async fn` — leaving such calls inline
+/// parks the entire multi-threaded runtime on the current worker thread,
+/// which freezes the Tauri event loop and any other in-flight commands.
+///
+/// On a sync context (no tokio runtime, e.g. watcher / architect threads)
+/// the closure is invoked inline.
+pub async fn spawn_blocking<F, R>(f: F) -> Result<R>
+where
+    F: FnOnce() -> Result<R> + Send + 'static,
+    R: Send + 'static,
+{
+    match tokio::runtime::Handle::try_current() {
+        Ok(_) => match tokio::task::spawn_blocking(move || f()).await {
+            Ok(r) => r,
+            Err(e) => Err(Error::Other(format!("blocking task join: {}", e))),
+        },
+        Err(_) => f(),
+    }
+}
+
 /// Resolve the path to the SQLite database (creating parent dirs).
 pub fn db_path() -> Result<PathBuf> {
     let base = dirs::config_dir().ok_or_else(|| Error::Other("config dir unavailable".into()))?;
@@ -32,11 +54,30 @@ pub fn init_pool() -> Result<DbPool> {
 
     let manager = SqliteConnectionManager::file(&path).with_init(|c| {
         c.execute_batch(
+            // WAL + foreign keys + 5s busy-wait for the multi-writer case.
+            // `synchronous=NORMAL` is the sweet spot: durable across
+            // application crashes (not power loss — WAL is replayed),
+            // and ~10x faster than FULL on fsync-heavy workloads.
+            // `temp_store=MEMORY` keeps large sorts inside the process.
+            // `cache_size` is in KiB; -64000 = 64 MiB.
+            // `mmap_size` enables memory-mapped I/O for read-heavy paths
+            // (memory_fts, agents list) on Linux.
             "PRAGMA foreign_keys = ON;
-             PRAGMA busy_timeout = 5000;",
+             PRAGMA busy_timeout = 5000;
+             PRAGMA synchronous = NORMAL;
+             PRAGMA temp_store = MEMORY;
+             PRAGMA cache_size = -64000;
+             PRAGMA mmap_size = 268435456;",
         )
     });
-    let pool = Pool::builder().max_size(8).build(manager)?;
+    // Keep at least 1 connection warm so the first command after idle
+    // doesn't pay the connection-establish cost (rusqlite is cheap to
+    // init, but the WAL checkpoint + mmap handshake on cold start is
+    // ~10ms — visible on a 240 FPS UI as a microstutter).
+    let pool = Pool::builder()
+        .max_size(8)
+        .min_idle(Some(1))
+        .build(manager)?;
     Ok(pool)
 }
 
@@ -45,8 +86,13 @@ pub(crate) fn migrate_one(conn: &rusqlite::Connection) -> Result<()> {
     let current: i64 = conn
         .query_row("PRAGMA user_version;", [], |r| r.get(0))
         .unwrap_or(0);
-    let target = 17;
+    let target = 18;
     if current >= target {
+        // Self-heal: an earlier build bumped user_version to 16+ without
+        // actually applying the ALTER TABLE statements for memory_notes.
+        // Re-add the columns/index defensively — all idempotent.
+        heal_memory_notes_kind(conn)?;
+        heal_memory_fts(conn)?;
         return Ok(());
     }
     if current < 1 {
@@ -536,7 +582,116 @@ pub(crate) fn migrate_one(conn: &rusqlite::Connection) -> Result<()> {
              COMMIT;",
         )?;
     }
+    if current < 18 {
+        // Custom API providers: user-registered OpenAI-compatible / Anthropic
+        // endpoints. The API key is NOT stored here — it lives in the
+        // encrypted secret store (crate::secrets), keyed by provider id.
+        // `model` is the user-selected model used by the gateway.
+        conn.execute_batch(
+            "BEGIN;
+             CREATE TABLE IF NOT EXISTS custom_providers (
+                id          TEXT PRIMARY KEY,
+                label       TEXT NOT NULL,
+                kind        TEXT NOT NULL,
+                base_url    TEXT NOT NULL,
+                model       TEXT NOT NULL DEFAULT '',
+                created_at  TEXT NOT NULL
+             );
+             COMMIT;",
+        )?;
+    }
     conn.pragma_update(None, "user_version", target)?;
+    Ok(())
+}
+
+/// Defensive backfill for v16: some installs bumped user_version without
+/// applying the ALTER TABLE statements (the batch failed mid-flight on a
+/// stale schema). Re-running ALTER for an existing column raises a
+/// "duplicate column name" error, so probe the schema first.
+fn heal_memory_notes_kind(conn: &rusqlite::Connection) -> Result<()> {
+    let has_kind: bool = conn
+        .query_row(
+            "SELECT 1 FROM pragma_table_info('memory_notes') WHERE name='kind'",
+            [],
+            |r| r.get::<_, i64>(0),
+        )
+        .map(|_| true)
+        .unwrap_or(false);
+    let has_ingest: bool = conn
+        .query_row(
+            "SELECT 1 FROM pragma_table_info('memory_notes') WHERE name='ingest_json'",
+            [],
+            |r| r.get::<_, i64>(0),
+        )
+        .map(|_| true)
+        .unwrap_or(false);
+    if !has_kind {
+        conn.execute_batch(
+            "ALTER TABLE memory_notes ADD COLUMN kind TEXT NOT NULL DEFAULT 'source';",
+        )?;
+    }
+    if !has_ingest {
+        conn.execute_batch("ALTER TABLE memory_notes ADD COLUMN ingest_json TEXT;")?;
+    }
+    conn.execute_batch(
+        "CREATE INDEX IF NOT EXISTS idx_notes_kind ON memory_notes(workspace_root, kind);",
+    )?;
+    Ok(())
+}
+
+/// Defensive backfill for v14: some installs bumped user_version past 14
+/// without applying the FTS5 column rename, so `memory_fts` still has
+/// columns `tags, aliases` while `memory_notes` has `tags_json,
+/// aliases_json`. Any FTS read that touches the content table (count,
+/// snippet on tag/alias columns, integrity-check, rebuild from triggers
+/// firing on UPDATE/DELETE) then errors with "no such column: T.tags".
+/// Probe the FTS schema and rebuild it when the column names are wrong.
+fn heal_memory_fts(conn: &rusqlite::Connection) -> Result<()> {
+    let has_tags_json: bool = conn
+        .query_row(
+            "SELECT 1 FROM pragma_table_xinfo('memory_fts') WHERE name='tags_json'",
+            [],
+            |r| r.get::<_, i64>(0),
+        )
+        .map(|_| true)
+        .unwrap_or(false);
+    if has_tags_json {
+        return Ok(());
+    }
+    tracing::warn!(
+        "memory_fts has stale columns (tags/aliases); rebuilding with tags_json/aliases_json"
+    );
+    conn.execute_batch(
+        "BEGIN;
+         DROP TRIGGER IF EXISTS memory_notes_ai;
+         DROP TRIGGER IF EXISTS memory_notes_ad;
+         DROP TRIGGER IF EXISTS memory_notes_au;
+         DROP TABLE IF EXISTS memory_fts;
+
+         CREATE VIRTUAL TABLE memory_fts USING fts5(
+            title, body, tags_json, aliases_json,
+            content='memory_notes', content_rowid='rowid',
+            tokenize='unicode61 remove_diacritics 2'
+         );
+
+         CREATE TRIGGER memory_notes_ai AFTER INSERT ON memory_notes BEGIN
+           INSERT INTO memory_fts(rowid, title, body, tags_json, aliases_json)
+           VALUES (new.rowid, new.title, new.body, new.tags_json, new.aliases_json);
+         END;
+         CREATE TRIGGER memory_notes_ad AFTER DELETE ON memory_notes BEGIN
+           INSERT INTO memory_fts(memory_fts, rowid, title, body, tags_json, aliases_json)
+           VALUES('delete', old.rowid, old.title, old.body, old.tags_json, old.aliases_json);
+         END;
+         CREATE TRIGGER memory_notes_au AFTER UPDATE ON memory_notes BEGIN
+           INSERT INTO memory_fts(memory_fts, rowid, title, body, tags_json, aliases_json)
+           VALUES('delete', old.rowid, old.title, old.body, old.tags_json, old.aliases_json);
+           INSERT INTO memory_fts(rowid, title, body, tags_json, aliases_json)
+           VALUES (new.rowid, new.title, new.body, new.tags_json, new.aliases_json);
+         END;
+
+         INSERT INTO memory_fts(memory_fts) VALUES('rebuild');
+         COMMIT;",
+    )?;
     Ok(())
 }
 
@@ -559,5 +714,100 @@ pub fn set_setting(pool: &DbPool, key: &str, value: &str) -> Result<()> {
          ON CONFLICT(key) DO UPDATE SET value=excluded.value",
         [key, value],
     )?;
+    Ok(())
+}
+
+/// A user-registered custom API provider row. The API key is NOT here — it
+/// lives in the encrypted secret store keyed by `id`.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct CustomProviderRow {
+    pub id: String,
+    pub label: String,
+    /// "openai" | "anthropic".
+    pub kind: String,
+    pub base_url: String,
+    /// User-selected model used by the gateway. Empty until chosen.
+    pub model: String,
+    pub created_at: String,
+}
+
+fn row_to_provider(row: &rusqlite::Row) -> rusqlite::Result<CustomProviderRow> {
+    Ok(CustomProviderRow {
+        id: row.get(0)?,
+        label: row.get(1)?,
+        kind: row.get(2)?,
+        base_url: row.get(3)?,
+        model: row.get(4)?,
+        created_at: row.get(5)?,
+    })
+}
+
+pub fn list_custom_providers(pool: &DbPool) -> Result<Vec<CustomProviderRow>> {
+    let conn = pool.get()?;
+    let mut stmt = conn.prepare(
+        "SELECT id, label, kind, base_url, model, created_at
+         FROM custom_providers ORDER BY created_at ASC",
+    )?;
+    let rows = stmt.query_map([], row_to_provider)?;
+    let mut out = Vec::new();
+    for r in rows {
+        out.push(r?);
+    }
+    Ok(out)
+}
+
+pub fn get_custom_provider(pool: &DbPool, id: &str) -> Result<Option<CustomProviderRow>> {
+    let conn = pool.get()?;
+    let mut stmt = conn.prepare(
+        "SELECT id, label, kind, base_url, model, created_at
+         FROM custom_providers WHERE id = ?1",
+    )?;
+    let mut rows = stmt.query([id])?;
+    if let Some(row) = rows.next()? {
+        Ok(Some(row_to_provider(row)?))
+    } else {
+        Ok(None)
+    }
+}
+
+pub fn insert_custom_provider(pool: &DbPool, p: &CustomProviderRow) -> Result<()> {
+    let conn = pool.get()?;
+    conn.execute(
+        "INSERT INTO custom_providers(id,label,kind,base_url,model,created_at)
+         VALUES(?1,?2,?3,?4,?5,?6)",
+        rusqlite::params![p.id, p.label, p.kind, p.base_url, p.model, p.created_at],
+    )?;
+    Ok(())
+}
+
+/// Update the mutable fields (label, base_url, model). `kind` and `id` are
+/// immutable once created.
+pub fn update_custom_provider(
+    pool: &DbPool,
+    id: &str,
+    label: &str,
+    base_url: &str,
+    model: &str,
+) -> Result<()> {
+    let conn = pool.get()?;
+    conn.execute(
+        "UPDATE custom_providers SET label=?2, base_url=?3, model=?4 WHERE id=?1",
+        rusqlite::params![id, label, base_url, model],
+    )?;
+    Ok(())
+}
+
+pub fn set_custom_provider_model(pool: &DbPool, id: &str, model: &str) -> Result<()> {
+    let conn = pool.get()?;
+    conn.execute(
+        "UPDATE custom_providers SET model=?2 WHERE id=?1",
+        rusqlite::params![id, model],
+    )?;
+    Ok(())
+}
+
+pub fn delete_custom_provider(pool: &DbPool, id: &str) -> Result<()> {
+    let conn = pool.get()?;
+    conn.execute("DELETE FROM custom_providers WHERE id = ?1", [id])?;
     Ok(())
 }

@@ -231,11 +231,15 @@ export function PigMemoryWorkbench() {
   const [activity, setActivity] = useState<ActivityEvent[]>([]);
 
   useEffect(() => {
+    // B-1.2 / H-?: guard against the IPC-listener-leak pattern. Without
+    // `dead`, a fast mount→unmount (e.g. StrictMode dev) would race the
+    // `onMemoryNoteCreated` promise — the listener could register after
+    // the cleanup had already run, leaking the unlisten handle.
+    let dead = false;
     let unlisten: (() => void) | null = null;
-    let cancelled = false;
     (async () => {
       const off = await onMemoryNoteCreated((evt) => {
-        if (cancelled) return;
+        if (dead) return;
         // Mark recent.
         setRecentNodeIds((prev) => {
           const next = new Set(prev);
@@ -262,6 +266,7 @@ export function PigMemoryWorkbench() {
         const existing = recentTimersRef.current.get(evt.id);
         if (existing) clearTimeout(existing);
         const t = setTimeout(() => {
+          if (dead) return;
           setRecentNodeIds((prev) => {
             if (!prev.has(evt.id)) return prev;
             const next = new Set(prev);
@@ -275,14 +280,14 @@ export function PigMemoryWorkbench() {
         reloadGraph();
         reloadList();
       });
-      if (cancelled) {
+      if (dead) {
         off();
       } else {
         unlisten = off;
       }
     })();
     return () => {
-      cancelled = true;
+      dead = true;
       if (unlisten) unlisten();
       for (const t of recentTimersRef.current.values()) clearTimeout(t);
       recentTimersRef.current.clear();
@@ -354,17 +359,23 @@ export function PigMemoryWorkbench() {
   );
 
   // ----- Mutations --------------------------------------------------------
+  // B-3.2: keep a ref to the latest state so the debounced auto-save
+  // timer below can read fresh values without us having to re-create
+  // the save callback (and re-arm the timer) on every keystroke.
+  const stateRef = useRef(s);
+  stateRef.current = s;
   const saveActive = useCallback(async () => {
-    if (!s.activeId || !s.active) return;
+    const state = stateRef.current;
+    if (!state.activeId || !state.active) return;
     try {
-      const tags = s.draftTags
+      const tags = state.draftTags
         .split(",")
         .map((t) => t.trim())
         .filter(Boolean);
       const n = await ipc.updateMemory({
-        id: s.activeId,
-        title: s.draftTitle,
-        body: s.draftBody,
+        id: state.activeId,
+        title: state.draftTitle,
+        body: state.draftBody,
         tags,
       });
       dispatch({ type: "active", note: n });
@@ -373,16 +384,7 @@ export function PigMemoryWorkbench() {
     } catch (err) {
       pushToast({ text: `update_memory: ${err}`, kind: "error" });
     }
-  }, [
-    s.activeId,
-    s.active,
-    s.draftTitle,
-    s.draftBody,
-    s.draftTags,
-    pushToast,
-    reloadList,
-    reloadGraph,
-  ]);
+  }, [pushToast, reloadList, reloadGraph]);
 
   // Auto-save 1s after the user stops typing — feels like Bear/Bridgemind.
   useEffect(() => {

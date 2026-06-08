@@ -200,7 +200,7 @@ fn score_project(q_norm: &str, p: &ProjectEntry, ctx: &ResolveContext<'_>) -> Ca
     }
 
     // Bonus for query tokens being a substring of dirname — picks up
-    // partial matches like "drugs" → "drugs-tracker-plugin".
+    // partial matches like "widget" → "widget-plugin".
     let dn = normalize(&p.dirname);
     if !q_norm.is_empty() && dn.contains(q_norm) {
         if dn == q_norm {
@@ -286,31 +286,31 @@ mod tests {
     #[test]
     fn typo_in_dirname_resolves() {
         let i = idx(vec![
-            project("/a/drugs-tracker-plugin", "drugs-tracker-plugin"),
+            project("/a/widget-plugin", "widget-plugin"),
             project("/a/pigide", "pigide"),
             project("/a/some-website", "some-website"),
         ]);
         let r = resolve("drug plgn", &i, &ResolveContext::default());
         assert!(matches!(r.status, ResolveStatus::Found));
-        assert!(r.candidates[0].path.ends_with("drugs-tracker-plugin"));
+        assert!(r.candidates[0].path.ends_with("widget-plugin"));
     }
 
     #[test]
     fn russian_query_via_alias() {
-        let mut p = project("/x/drugs-tracker-plugin", "drugs-tracker-plugin");
-        p.aliases = vec!["наркотики".into(), "drugs plugin".into()];
+        let mut p = project("/x/widget-plugin", "widget-plugin");
+        p.aliases = vec!["виджеты".into(), "widget plugin".into()];
         let i = idx(vec![p, project("/x/pigide", "pigide")]);
-        let r = resolve("наркотики", &i, &ResolveContext::default());
+        let r = resolve("виджеты", &i, &ResolveContext::default());
         assert!(matches!(r.status, ResolveStatus::Found));
-        assert!(r.candidates[0].path.ends_with("drugs-tracker-plugin"));
+        assert!(r.candidates[0].path.ends_with("widget-plugin"));
     }
 
     #[test]
     fn human_name_via_readme() {
-        let mut p = project("/x/drugs-tracker-plugin", "drugs-tracker-plugin");
+        let mut p = project("/x/widget-plugin", "widget-plugin");
         p.headings = vec!["Drugs Plugin".into()];
         let i = idx(vec![p, project("/x/pigide", "pigide")]);
-        let r = resolve("drugs plugin", &i, &ResolveContext::default());
+        let r = resolve("widget plugin", &i, &ResolveContext::default());
         assert!(matches!(r.status, ResolveStatus::Found));
     }
 

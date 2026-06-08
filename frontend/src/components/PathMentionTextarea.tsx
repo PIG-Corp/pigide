@@ -23,6 +23,7 @@ import {
   tokenLeftOfCaret,
   uniqueLabel,
 } from "./pathMentionHelpers";
+import { stripControl } from "../lib/stripControl";
 
 /**
  * PathMentionTextarea — Architect chat input with `@`-mention autocomplete
@@ -96,6 +97,8 @@ export const PathMentionTextarea = forwardRef<
   const mirrorRef = useRef<HTMLDivElement | null>(null);
   const currentId = useStore((s) => s.currentId);
   const agents = useStore((s) => s.agents);
+  // B-1.6: monotonically increasing request id for suggestPaths — see useEffect below.
+  const suggestReqIdRef = useRef(0);
 
   const [trigger, setTrigger] = useState<{ start: number; query: string } | null>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -125,6 +128,9 @@ export const PathMentionTextarea = forwardRef<
 
   // Debounced backend path suggestion. Only fires for non-empty triggers
   // whose query has at least 1 char OR ends with `/` (browse-the-dir UX).
+  // B-1.6: tag every in-flight fetch with a request id and drop responses
+  // whose id no longer matches the latest one — otherwise a slow backend
+  // can let a stale `q` overwrite a fresher suggestion.
   useEffect(() => {
     if (!trigger) {
       setPathRows([]);
@@ -135,19 +141,20 @@ export const PathMentionTextarea = forwardRef<
       setPathRows([]);
       return;
     }
-    let cancelled = false;
+    const reqId = ++suggestReqIdRef.current;
     const t = setTimeout(() => {
       ipc
         .suggestPaths(q, currentId ?? null)
         .then((rows) => {
-          if (!cancelled) setPathRows(rows);
+          if (reqId !== suggestReqIdRef.current) return;
+          setPathRows(rows);
         })
         .catch(() => {
-          if (!cancelled) setPathRows([]);
+          if (reqId !== suggestReqIdRef.current) return;
+          setPathRows([]);
         });
     }, SUGGEST_DEBOUNCE_MS);
     return () => {
-      cancelled = true;
       clearTimeout(t);
     };
   }, [trigger, currentId]);
@@ -284,7 +291,19 @@ export const PathMentionTextarea = forwardRef<
   };
 
   const onChangeInternal = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    const next = e.target.value;
+    // Strip stray terminal control sequences (xterm focus reports,
+    // DECRQM mode reports, buffered arrow / Shift-Tab bytes) that can
+    // land in the textarea when focus moves between tiles under Tauri
+    // WebView2. Drop only the leading prefix of dropped bytes; for
+    // mid-string drops we re-derive the caret by character offset.
+    const raw = e.target.value;
+    const next = stripControl(raw);
+    if (next !== raw) {
+      e.target.value = next;
+      const caret = e.target.selectionStart ?? raw.length;
+      const cleanedBefore = stripControl(raw.slice(0, caret)).length;
+      e.target.setSelectionRange(cleanedBefore, cleanedBefore);
+    }
     onChange(next);
     onAttachmentsChange(reconcileAttachments(next, attachments));
     setTrigger(findTrigger(next, e.target.selectionStart));

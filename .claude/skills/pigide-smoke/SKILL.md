@@ -28,7 +28,7 @@ Quick regression that catches the class of bugs we hit most often: spawn returns
 
 If the helper covers the scenario as-is, run it via Bash:
 ```
-cd /home/camer/pigide/src-tauri && python3 scripts/smoke_quit_restart.py
+cd src-tauri && python3 scripts/smoke_quit_restart.py
 ```
 Capture exit code and stderr. Non-zero = bug; report stderr verbatim, do not summarize.
 

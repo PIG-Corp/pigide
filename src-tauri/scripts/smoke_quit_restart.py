@@ -7,7 +7,8 @@ import socket, json, base64, time, subprocess, os, sys
 
 SOCK = "/tmp/pq.sock"
 LOG_DIR = "/tmp/pq-logs"
-AGENTD = "/home/camer/pigide/target/debug/pigide-agentd"
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+AGENTD = os.path.join(SCRIPT_DIR, "../../target/debug/pigide-agentd")
 
 
 def conn():
@@ -43,13 +44,20 @@ def main():
     broker_pid = proc.pid
     print(f"broker pid: {broker_pid}")
 
-    # Wait for socket.
-    for _ in range(30):
+    # Wait for socket and connection.
+    for _ in range(100):
         if os.path.exists(SOCK):
-            break
+            try:
+                test_sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                test_sock.settimeout(0.5)
+                test_sock.connect(SOCK)
+                test_sock.close()
+                break
+            except ConnectionRefusedError:
+                pass
         time.sleep(0.1)
     else:
-        raise RuntimeError("broker did not bind socket")
+        raise RuntimeError("broker did not bind socket or accept connections")
 
     # === Launch 1: spawn agent + write some history ===
     c = conn()

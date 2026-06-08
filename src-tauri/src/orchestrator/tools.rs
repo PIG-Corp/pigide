@@ -192,7 +192,7 @@ pub fn tool_definitions() -> Vec<Value> {
     out.extend(swarm::tools::tool_definitions());
     out.push(function_tool(
         "resolve_project",
-        "Match a fuzzy natural-language hint (e.g. 'drugs plugin', 'наркотики плагин', 'pigide') to a real project directory. Returns status=found|ambiguous|not_found and up to 5 candidates. Use this BEFORE deciding what to open.",
+        "Match a fuzzy natural-language hint (e.g. 'widget plugin', 'виджеты плагин', 'pigide') to a real project directory. Returns status=found|ambiguous|not_found and up to 5 candidates. Use this BEFORE deciding what to open.",
         json!({
             "type": "object",
             "properties": {
@@ -304,7 +304,10 @@ pub async fn dispatch(
             };
             db::set_setting(db, "current_workspace_id", &ws.id)?;
             if let Some(app) = app {
-                let _ = app.emit(EV_WORKSPACE_CHANGED, json!({ "current_workspace_id": ws.id }));
+                let _ = app.emit(
+                    EV_WORKSPACE_CHANGED,
+                    json!({ "current_workspace_id": ws.id }),
+                );
             }
             Ok(json!({
                 "id": ws.id,
@@ -511,7 +514,11 @@ pub async fn dispatch(
                 .ok_or_else(|| Error::Invalid("agent_id required".into()))?;
             let n = args.get("bytes").and_then(|v| v.as_u64()).unwrap_or(4000) as usize;
             let log = dirs::data_local_dir()
-                .map(|d| d.join("pigide").join("agents").join(format!("{}.log", agent_id)))
+                .map(|d| {
+                    d.join("pigide")
+                        .join("agents")
+                        .join(format!("{}.log", agent_id))
+                })
                 .ok_or_else(|| Error::Other("no data dir".into()))?;
             if !log.exists() {
                 return Ok(json!({"agent_id": agent_id, "tail": ""}));
@@ -570,7 +577,10 @@ pub async fn dispatch(
                 Some(s) => Some(s.to_string()),
                 None => db::get_setting(db, "current_workspace_id").ok().flatten(),
             };
-            let status = args.get("status").and_then(|v| v.as_str()).map(String::from);
+            let status = args
+                .get("status")
+                .and_then(|v| v.as_str())
+                .map(String::from);
             let agent_id = args
                 .get("agent_id")
                 .and_then(|v| v.as_str())
@@ -591,10 +601,7 @@ pub async fn dispatch(
                 .and_then(|v| v.as_str())
                 .ok_or_else(|| Error::Invalid("id required".into()))?
                 .to_string();
-            let title = args
-                .get("title")
-                .and_then(|v| v.as_str())
-                .map(String::from);
+            let title = args.get("title").and_then(|v| v.as_str()).map(String::from);
             let instructions = args
                 .get("instructions")
                 .and_then(|v| v.as_str())
@@ -622,22 +629,24 @@ pub async fn dispatch(
                 .get("task_id")
                 .and_then(|v| v.as_str())
                 .ok_or_else(|| Error::Invalid("task_id required".into()))?;
-            let agent_id = args
-                .get("agent_id")
-                .and_then(|v| if v.is_null() { None } else { v.as_str() });
+            let agent_id =
+                args.get("agent_id")
+                    .and_then(|v| if v.is_null() { None } else { v.as_str() });
             let task = task_mgr.assign(task_id, agent_id)?;
             Ok(serde_json::to_value(&task)?)
         }
         // Memory tools dispatched from the dedicated module.
-        "create_memory" | "read_memory" | "update_memory" | "delete_memory"
-        | "list_memories" | "search_memories" | "find_backlinks"
-        | "suggest_connections" => {
-            memory::tools::dispatch(memory_svc, db, name, args).await
-        }
+        "create_memory"
+        | "read_memory"
+        | "update_memory"
+        | "delete_memory"
+        | "list_memories"
+        | "search_memories"
+        | "find_backlinks"
+        | "suggest_connections" => memory::tools::dispatch(memory_svc, db, name, args).await,
         // Swarm tools (sync — no I/O beyond SQLite).
-        "send_mail" | "broadcast" | "read_mailbox" | "mark_mail_read"
-        | "start_rollcall" | "collect_rollcall"
-        | "claim_files" | "release_files" | "list_file_owners"
+        "send_mail" | "broadcast" | "read_mailbox" | "mark_mail_read" | "start_rollcall"
+        | "collect_rollcall" | "claim_files" | "release_files" | "list_file_owners"
         | "open_review_gate" | "vote_review_gate" | "list_review_gates" => {
             swarm::tools::dispatch(db, name, args)
         }
@@ -666,13 +675,10 @@ pub async fn dispatch(
                         .and_then(|v| v.as_str())
                         .map(|s| s.to_string())
                         .unwrap_or_else(|| pick.display_name.clone());
-                    let existing = ws_mgr
-                        .list()?
-                        .into_iter()
-                        .find(|w| {
-                            w.name.eq_ignore_ascii_case(&ws_name)
-                                || w.paths.iter().any(|p| paths_eq(p, &pick.path))
-                        });
+                    let existing = ws_mgr.list()?.into_iter().find(|w| {
+                        w.name.eq_ignore_ascii_case(&ws_name)
+                            || w.paths.iter().any(|p| paths_eq(p, &pick.path))
+                    });
                     let ws = match existing {
                         Some(mut w) => {
                             if !w.paths.iter().any(|p| paths_eq(p, &pick.path)) {

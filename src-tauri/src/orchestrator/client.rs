@@ -2,6 +2,7 @@ use crate::error::{Error, Result};
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::sync::OnceLock;
 
 #[derive(Debug, Clone)]
 pub struct OmniClient {
@@ -9,6 +10,23 @@ pub struct OmniClient {
     pub model: String,
     pub api_key: Option<String>,
     http: reqwest::Client,
+}
+
+/// Shared reqwest client. `reqwest::Client` holds its own connection
+/// pool + DNS cache + idle keep-alive connections; constructing one per
+/// turn (which is what `build_provider` did before this fix) leaks
+/// sockets and re-resolves DNS on every request. One client per process
+/// is the documented best practice.
+fn shared_http() -> &'static reqwest::Client {
+    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(120))
+            .pool_idle_timeout(std::time::Duration::from_secs(90))
+            .tcp_keepalive(std::time::Duration::from_secs(60))
+            .build()
+            .expect("reqwest client")
+    })
 }
 
 #[derive(Debug, Deserialize)]
@@ -38,10 +56,7 @@ impl OmniClient {
             base_url,
             model,
             api_key,
-            http: reqwest::Client::builder()
-                .timeout(std::time::Duration::from_secs(120))
-                .build()
-                .expect("reqwest client"),
+            http: shared_http().clone(),
         }
     }
 
@@ -50,7 +65,10 @@ impl OmniClient {
         messages: Vec<Value>,
         tools: Option<Vec<Value>>,
     ) -> Result<ChatResponse> {
-        let url = format!("{}/v1/chat/completions", self.base_url.trim_end_matches('/'));
+        let url = format!(
+            "{}/v1/chat/completions",
+            self.base_url.trim_end_matches('/')
+        );
         let mut body = serde_json::json!({
             "model": self.model,
             "messages": messages,
@@ -62,9 +80,10 @@ impl OmniClient {
             body["tool_choice"] = Value::String("auto".into());
         }
         tracing::debug!(
-            "OmniRouter -> {}: {}",
+            "OmniRouter -> {}: model={} messages={} stream=false",
             url,
-            serde_json::to_string(&body).unwrap_or_default()
+            self.model,
+            messages.len()
         );
         let mut req = self.http.post(&url).json(&body);
         if let Some(key) = &self.api_key {
@@ -79,11 +98,14 @@ impl OmniClient {
         let status = resp.status();
         if !status.is_success() {
             let text = resp.text().await.unwrap_or_default();
+            // Do NOT log the request body: it carries the full prompt
+            // (chat history, world state, memory hot-cache, tool catalogue)
+            // and any content the user typed. Only the status + the
+            // provider's response (truncated) are recorded.
             tracing::error!(
-                "OmniRouter {} body sent={} response={}",
+                "OmniRouter {} response={}",
                 status,
-                serde_json::to_string(&body).unwrap_or_default(),
-                text
+                text.chars().take(500).collect::<String>()
             );
             return Err(Error::Orchestrator(format!(
                 "OmniRouter {} -> {}",
@@ -111,7 +133,10 @@ impl OmniClient {
     where
         F: FnMut(&str),
     {
-        let url = format!("{}/v1/chat/completions", self.base_url.trim_end_matches('/'));
+        let url = format!(
+            "{}/v1/chat/completions",
+            self.base_url.trim_end_matches('/')
+        );
         let mut body = serde_json::json!({
             "model": self.model,
             "messages": messages,
@@ -135,11 +160,11 @@ impl OmniClient {
         let status = resp.status();
         if !status.is_success() {
             let text = resp.text().await.unwrap_or_default();
+            // Do NOT log the request body — see non-stream path above.
             tracing::error!(
-                "OmniRouter stream {} body sent={} response={}",
+                "OmniRouter stream {} response={}",
                 status,
-                serde_json::to_string(&body).unwrap_or_default(),
-                text
+                text.chars().take(500).collect::<String>()
             );
             return Err(Error::Orchestrator(format!(
                 "OmniRouter {} -> {}",
@@ -156,8 +181,7 @@ impl OmniClient {
         let mut stream = resp.bytes_stream();
         let mut buf = String::new();
         'outer: while let Some(chunk) = stream.next().await {
-            let bytes = chunk
-                .map_err(|e| Error::Orchestrator(format!("stream: {}", e)))?;
+            let bytes = chunk.map_err(|e| Error::Orchestrator(format!("stream: {}", e)))?;
             buf.push_str(&String::from_utf8_lossy(&bytes));
             // SSE events are separated by blank lines.
             while let Some(end) = buf.find("\n\n") {
@@ -190,7 +214,8 @@ impl OmniClient {
                     }
                     if let Some(tcs) = delta.get("tool_calls").and_then(|v| v.as_array()) {
                         for tc in tcs {
-                            let idx = tc.get("index").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+                            let idx =
+                                tc.get("index").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
                             let entry = tool_calls_by_idx.entry(idx).or_default();
                             if let Some(id) = tc.get("id").and_then(|v| v.as_str()) {
                                 if !id.is_empty() {
@@ -201,16 +226,12 @@ impl OmniClient {
                                 entry.kind = typ.to_string();
                             }
                             if let Some(func) = tc.get("function") {
-                                if let Some(name) =
-                                    func.get("name").and_then(|v| v.as_str())
-                                {
+                                if let Some(name) = func.get("name").and_then(|v| v.as_str()) {
                                     if !name.is_empty() {
                                         entry.name = name.to_string();
                                     }
                                 }
-                                if let Some(args) =
-                                    func.get("arguments").and_then(|v| v.as_str())
-                                {
+                                if let Some(args) = func.get("arguments").and_then(|v| v.as_str()) {
                                     entry.arguments.push_str(args);
                                 }
                             }
@@ -228,7 +249,11 @@ impl OmniClient {
                     .into_values()
                     .map(|t| crate::chat::ToolCall {
                         id: t.id,
-                        kind: if t.kind.is_empty() { "function".into() } else { t.kind },
+                        kind: if t.kind.is_empty() {
+                            "function".into()
+                        } else {
+                            t.kind
+                        },
                         function: crate::chat::FunctionCall {
                             name: t.name,
                             arguments: t.arguments,
@@ -240,7 +265,11 @@ impl OmniClient {
 
         Ok(ChatRespMessage {
             role: "assistant".into(),
-            content: if content.is_empty() { None } else { Some(content) },
+            content: if content.is_empty() {
+                None
+            } else {
+                Some(content)
+            },
             tool_calls,
         })
     }

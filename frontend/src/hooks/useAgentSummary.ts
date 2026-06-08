@@ -89,7 +89,11 @@ export function useAgentSummary(
       pending = window.setTimeout(recompute, THROTTLE_MS);
     };
 
+    // B-1.4: if the IPC subscription resolves AFTER unmount, drop the
+    // listener immediately so we don't double-fire and so the cleanup
+    // closure doesn't capture stale state.
     onAgentStdout((e) => {
+      if (disposed) return;
       if (e.agent_id !== agentId) return;
       const text = decoder.decode(fromB64(e.data_b64), { stream: true });
       const merged = buf + text;

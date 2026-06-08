@@ -266,7 +266,11 @@ fn canonicalize_existing_or_parent(path: &Path) -> Result<PathBuf> {
 
 /// Walk a directory recursively up to `max_files` entries. Excludes
 /// `.git`, `node_modules`, `target`, `dist`, `.pnpm-store`, `.pigmemory`.
-pub fn walk_files(root: &str, max_files: usize, allowed_roots: &[PathBuf]) -> Result<Vec<DirEntry>> {
+pub fn walk_files(
+    root: &str,
+    max_files: usize,
+    allowed_roots: &[PathBuf],
+) -> Result<Vec<DirEntry>> {
     let root_path = validate_existing_workspace_path(root, allowed_roots)?;
     if !root_path.exists() {
         return Err(Error::NotFound(format!("path {}", root)));
@@ -404,10 +408,10 @@ mod tests {
     #[test]
     fn walk_rejects_paths_outside_workspace() {
         let root = tempdir_for_test("pigide-files-walk-root");
-        let outside = root
-            .parent()
-            .unwrap()
-            .join(format!("pigide-files-walk-outside-{}", uuid::Uuid::new_v4()));
+        let outside = root.parent().unwrap().join(format!(
+            "pigide-files-walk-outside-{}",
+            uuid::Uuid::new_v4()
+        ));
         std::fs::create_dir_all(&outside).unwrap();
 
         let err = walk_files(&outside.to_string_lossy(), 10, std::slice::from_ref(&root))

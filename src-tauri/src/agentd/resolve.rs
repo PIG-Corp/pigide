@@ -98,6 +98,8 @@ pub fn resolve_binary(db: &DbPool, agent_type: &AgentType) -> String {
         AgentType::OpenCode => vec![
             format!("{}/.local/bin/opencode", home),
             format!("{}/.opencode/bin/opencode", home),
+            format!("{}/.npm-global/bin/opencode", home),
+            format!("{}/.bun/bin/opencode", home),
             "/usr/local/bin/opencode".into(),
             "/usr/bin/opencode".into(),
             "opencode".into(),
@@ -167,15 +169,26 @@ pub fn resolve_argv(
     args_override: Option<Vec<String>>,
     mcp_handle: Option<&Arc<crate::mcp::server::McpServerHandle>>,
 ) -> Vec<String> {
+    // Default argv per agent type. These run in addition to anything the
+    // user has configured in `args.<type>` and the caller `args_override`,
+    // and below the `--mcp-config` injection for Claude tiles.
+    //
+    // Every CLI agent whose upstream tool supports a "bypass permissions"
+    // mode is opted in here. The whole point of spawning these from
+    // pigide is to run autonomous agent loops — interactive per-tool
+    // permission prompts would be a UX dead-end, and the user is
+    // already trusting pigide as the orchestrator. To opt out, set
+    // `args.<type>` in the settings to a custom value and that path
+    // will be used instead.
     let default_args: &[&str] = match agent_type {
         AgentType::KiroCli => &["chat", "--trust-all-tools"],
-        AgentType::Claude => &[],
-        AgentType::Aider => &["--no-auto-commits"],
-        AgentType::Goose => &["session"],
+        AgentType::Claude => &["--dangerously-skip-permissions"],
+        AgentType::Aider => &["--no-auto-commits", "--yes-always"],
+        AgentType::Goose => &["session", "--no-confirmations"],
         AgentType::OpenCode => &[],
-        AgentType::Devin => &[],
-        AgentType::Agy => &[],
-        AgentType::Codex => &[],
+        AgentType::Devin => &["--auto-approve"],
+        AgentType::Agy => &["--auto-approve"],
+        AgentType::Codex => &["--dangerously-bypass-approvals-and-sandbox"],
         AgentType::Ssh => &[],
     };
 
@@ -198,9 +211,7 @@ pub fn resolve_argv(
                     argv.push(cfg);
                 }
                 Ok(None) => {
-                    tracing::info!(
-                        "claude tile: MCP server not running, skipping --mcp-config"
-                    );
+                    tracing::info!("claude tile: MCP server not running, skipping --mcp-config");
                 }
                 Err(e) => {
                     tracing::warn!("claude tile: failed to build --mcp-config: {}", e);
@@ -388,7 +399,11 @@ mod tests {
         let argv = resolve_argv(&p, &AgentType::Aider, None, None);
         assert_eq!(
             argv,
-            vec!["--watch-files".to_string(), "--map-tokens".into(), "8192".into()]
+            vec![
+                "--watch-files".to_string(),
+                "--map-tokens".into(),
+                "8192".into()
+            ]
         );
     }
 

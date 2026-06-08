@@ -21,6 +21,7 @@ pub mod project_resolver;
 pub mod prompts;
 pub mod rooms;
 pub mod sanitize;
+pub mod secrets;
 pub mod skills;
 pub mod ssh;
 pub mod state;
@@ -420,6 +421,16 @@ pub fn run() {
             commands::set_chat_scope,
             commands::set_setting,
             commands::get_setting,
+            commands::provider_info,
+            commands::provider_test_connection,
+            commands::provider_list,
+            commands::provider_create,
+            commands::provider_update,
+            commands::provider_delete,
+            commands::provider_set_model,
+            commands::provider_set_active,
+            commands::provider_fetch_models,
+            commands::provider_probe_models,
             commands::start_voice,
             commands::stop_voice,
             commands::cancel_voice,

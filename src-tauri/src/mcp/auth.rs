@@ -47,7 +47,9 @@ pub fn create(db: &DbPool, label: &str, scopes: Vec<String>) -> Result<CreatedKe
     let id = Uuid::new_v4().to_string();
     let ts = Utc::now().to_rfc3339();
     let scope_str = if scopes.is_empty() {
-        "read,mutate".to_string()
+        // Least privilege: an unspecified scope set grants read-only. Callers
+        // that need write/dangerous access must request them explicitly.
+        "read".to_string()
     } else {
         scopes.join(",")
     };
@@ -167,5 +169,17 @@ mod tests {
     fn invalid_key_returns_none() {
         let p = pool();
         assert!(validate(&p, "pk_nope").unwrap().is_none());
+    }
+
+    #[test]
+    fn empty_scopes_default_to_read_only() {
+        let p = pool();
+        let k = create(&p, "defaults", vec![]).unwrap();
+        let info = validate(&p, &k.plaintext).unwrap().unwrap();
+        assert_eq!(info.scopes, vec!["read"]);
+        assert!(!info
+            .scopes
+            .iter()
+            .any(|s| s == "mutate" || s == "dangerous"));
     }
 }

@@ -99,7 +99,7 @@ pub fn tokens(s: &str) -> Vec<String> {
 /// missing token in either query or signal is forgiven.
 ///
 /// As a fallback for token corpora with no exact-match overlap (e.g. "drug"
-/// vs "drugs"), we also run a pairwise jaro_winkler max so near-misses
+/// vs "widget"), we also run a pairwise jaro_winkler max so near-misses
 /// still produce a reasonable score.
 pub fn token_set_ratio(a: &str, b: &str) -> f64 {
     let ta_v = tokens(a);
@@ -218,14 +218,14 @@ mod tests {
 
     #[test]
     fn token_set_handles_reordering() {
-        let s = token_set_ratio("plugin drugs", "drugs plugin");
+        let s = token_set_ratio("plugin widget", "widget plugin");
         assert!(s >= 0.95, "score={}", s);
     }
 
     #[test]
     fn fuzzy_typo_match() {
-        // "drug plgn" → "drugs-tracker-plugin"
-        let s = fuzzy_score("drug plgn", "drugs-tracker-plugin");
+        // "drug plgn" → "widget-plugin"
+        let s = fuzzy_score("drug plgn", "widget-plugin");
         assert!(s >= 0.7, "score={}", s);
     }
 
@@ -237,16 +237,16 @@ mod tests {
 
     #[test]
     fn fuzzy_unrelated_low() {
-        let s = fuzzy_score("kettlebell", "drugs-tracker-plugin");
+        let s = fuzzy_score("kettlebell", "widget-plugin");
         assert!(s < 0.6, "score={}", s);
     }
 
     #[test]
     fn all_tokens_contained_basic() {
-        assert!(all_tokens_contained("drugs plugin", "drugs-tracker-plugin"));
+        assert!(all_tokens_contained("widget plugin", "widget-plugin"));
         assert!(!all_tokens_contained(
             "kettle plugin",
-            "drugs-tracker-plugin"
+            "widget-plugin"
         ));
     }
 }

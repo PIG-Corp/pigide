@@ -30,7 +30,7 @@ fn make(root: &Path, name: &str, files: &[(&str, &str)]) {
 fn corpus(root: &Path) {
     make(
         root,
-        "drugs-tracker-plugin",
+        "widget-plugin",
         &[
             ("Cargo.toml", "[package]\nname = \"drugs_tracker\"\n"),
             (
@@ -73,12 +73,12 @@ fn corpus(root: &Path) {
         )],
     );
 
-    // Add an alias for drugs-tracker-plugin.
-    let drugs = root.join("drugs-tracker-plugin").join(".pigmemory");
+    // Add an alias for widget-plugin.
+    let drugs = root.join("widget-plugin").join(".pigmemory");
     fs::create_dir_all(&drugs).unwrap();
     fs::write(
         drugs.join("aliases.json"),
-        r#"{"aliases":["drugs","drugs plugin","наркотики"]}"#,
+        r#"{"aliases":["widget","widget plugin","виджеты"]}"#,
     )
     .unwrap();
 }
@@ -115,12 +115,12 @@ fn fifteen_realistic_queries() {
 
     // (query, expected_dirname_or_none)
     let cases: Vec<(&str, Option<&str>)> = vec![
-        ("drugs plugin", Some("drugs-tracker-plugin")),
-        ("drug plgn", Some("drugs-tracker-plugin")),
-        ("drugs", Some("drugs-tracker-plugin")),
-        ("DrugsPlugin", Some("drugs-tracker-plugin")),
-        ("наркотики", Some("drugs-tracker-plugin")),
-        ("наркотики плагин", Some("drugs-tracker-plugin")),
+        ("widget plugin", Some("widget-plugin")),
+        ("drug plgn", Some("widget-plugin")),
+        ("widget", Some("widget-plugin")),
+        ("DrugsPlugin", Some("widget-plugin")),
+        ("виджеты", Some("widget-plugin")),
+        ("виджеты плагин", Some("widget-plugin")),
         ("pigide", Some("pigide")),
         ("PigIDE", Some("pigide")),
         ("pgide", Some("pigide")),

@@ -64,6 +64,16 @@ function toB64(s: string): string {
   return btoa(bin);
 }
 
+// B-10.1: strip the control characters that are dangerous to forward to
+// a PTY. We keep \t, \n, \r (legitimate paste of multi-line text) and
+// printable ASCII + valid UTF-8; everything else is dropped. The backend
+// applies the same filter (defence in depth), but filtering at the source
+// also stops garbage from spamming the IPC channel.
+const CTRL_CHARS = /[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F]/g;
+function sanitizeForPty(s: string): string {
+  return s.replace(CTRL_CHARS, "");
+}
+
 // Decode base64 -> Uint8Array.
 function fromB64(b64: string): Uint8Array {
   const bin = atob(b64);
@@ -139,7 +149,12 @@ export function AgentTile({ agent, isFocused, isMaximized }: Props) {
       }
     });
 
-    // Send keystrokes back to PTY.
+    // Send keystrokes back to PTY. xterm.js only emits bytes that
+    // correspond to real user keys — every interactive key (arrows,
+    // Backspace=0x7F, Ctrl+C=0x03, …) starts with ESC=0x1B or a C0
+    // control byte, so we must NOT strip them here. Sanitisation is
+    // only safe on paste/drop paths (defence-in-depth) and on the
+    // display side. B-10.1 originally conflated the two directions.
     const onDataDisp = term.onData((data) => {
       ipc.writeToAgent(agent.id, toB64(data)).catch((err) => {
         console.error("write_to_agent failed", err);
@@ -151,45 +166,35 @@ export function AgentTile({ agent, isFocused, isMaximized }: Props) {
     node.addEventListener("mousedown", focusHandler);
 
     // ResizeObserver -> fit -> resize_agent.
+    // B-2.4: debounce the resize IPC by 50ms so a window drag doesn't
+    // flood the channel with one fit+resize call per frame.
+    let resizeTimer: ReturnType<typeof setTimeout> | null = null;
     const ro = new ResizeObserver(() => {
       if (termDisposedRef.current) return;
-      try {
-        fit.fit();
-        const { cols, rows } = term;
-        ipc.resizeAgent(agent.id, cols, rows).catch(() => undefined);
-      } catch {
-        /* ignore */
-      }
-    });
-    ro.observe(node);
-
-    // Replay scrollback from the persistent PTY log so a session restore
-    // (or just remounting the tile) brings xterm up with the last 64 KiB of
-    // terminal history. Run BEFORE subscribing to live stdout so we don't
-    // race with new output.
-    let cancelled = false;
-    parserRef.current = new CommandBlockParser();
-    ipc.agentLogTail(agent.id, 64 * 1024)
-      .then((b64) => {
-        if (cancelled || !b64) return;
+      if (resizeTimer) clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(() => {
+        if (termDisposedRef.current) return;
         try {
-          const parsed = parserRef.current?.feed(fromB64(b64));
-          term.write(parsed ?? fromB64(b64));
-          const taken = parserRef.current?.take() ?? [];
-          if (taken.length) setBlocks((b) => mergeBlocks(b, taken));
+          fit.fit();
+          const { cols, rows } = term;
+          ipc.resizeAgent(agent.id, cols, rows).catch(() => undefined);
         } catch {
           /* ignore */
         }
-      })
-      .catch(() => undefined);
+      }, 50);
+    });
+    ro.observe(node);
 
-    // Subscribe to backend stdout for THIS agent. Track disposal so a
-    // promise that resolves AFTER unmount still cleans up.
+    // B-1.3: subscribe to live stdout FIRST so we don't lose chunks
+    // emitted during the agentLogTail fetch. The replay below merges into
+    // the same parser instance, so the boundary between "replay" and
+    // "live" is single-pass and never drops data.
     let disposed = false;
     let unsubStdout: (() => void) | null = null;
     let unsubExit: (() => void) | null = null;
 
     onAgentStdout((e) => {
+      if (disposed) return;
       if (e.agent_id !== agent.id) return;
       const bytes = fromB64(e.data_b64);
       const filtered = parserRef.current?.feed(bytes) ?? bytes;
@@ -202,6 +207,7 @@ export function AgentTile({ agent, isFocused, isMaximized }: Props) {
     });
 
     onAgentExit((e) => {
+      if (disposed) return;
       if (e.agent_id !== agent.id) return;
       term.write("\r\n\x1b[2;33m[process exited]\x1b[0m\r\n");
     }).then((u) => {
@@ -209,12 +215,42 @@ export function AgentTile({ agent, isFocused, isMaximized }: Props) {
       else unsubExit = u;
     });
 
+    // Replay scrollback from the persistent PTY log so a session restore
+    // (or just remounting the tile) brings xterm up with the last 64 KiB of
+    // terminal history. Live listener is already active above, so any
+    // bytes that arrive during this fetch are not lost.
+    let cancelled = false;
+    parserRef.current = new CommandBlockParser();
+    ipc.agentLogTail(agent.id, 64 * 1024)
+      .then((b64) => {
+        if (cancelled || disposed || !b64) return;
+        // Defer the write one frame so the FitAddon has measured the
+        // container (the rAF above is the one that calls fit.fit()).
+        // Without this the scrollback paints at the default 80x24 grid
+        // and the very next ResizeObserver tick re-flows it, producing
+        // the visible "tile re-renders with the wrong columns" glitch
+        // on every workspace switch.
+        requestAnimationFrame(() => {
+          if (cancelled || disposed) return;
+          try {
+            const parsed = parserRef.current?.feed(fromB64(b64));
+            term.write(parsed ?? fromB64(b64));
+            const taken = parserRef.current?.take() ?? [];
+            if (taken.length) setBlocks((b) => mergeBlocks(b, taken));
+          } catch {
+            /* ignore */
+          }
+        });
+      })
+      .catch(() => undefined);
+
     return () => {
       disposed = true;
       cancelled = true;
       termDisposedRef.current = true;
       onDataDisp.dispose();
       ro.disconnect();
+      if (resizeTimer) clearTimeout(resizeTimer);
       node.removeEventListener("mousedown", focusHandler);
       if (unsubStdout) unsubStdout();
       if (unsubExit) unsubExit();
@@ -248,7 +284,8 @@ export function AgentTile({ agent, isFocused, isMaximized }: Props) {
     }
   }, [theme]);
 
-  // Ctrl+F opens search; Escape closes it (and the context menu).
+  // Ctrl+F opens search; Ctrl+C / Ctrl+Shift+C copy the terminal selection
+  // (same as the right-click "Copy" menu item); Escape closes it all.
   useEffect(() => {
     const node = bodyRef.current;
     if (!node) return;
@@ -258,6 +295,26 @@ export function AgentTile({ agent, isFocused, isMaximized }: Props) {
         e.stopPropagation();
         setSearchOpen(true);
         requestAnimationFrame(() => searchInputRef.current?.focus());
+        return;
+      }
+      // Copy selection: Ctrl+C (or Cmd+C on macOS). Ctrl+Shift+C is also
+      // bound so users with the "select-with-mouse, then chord" habit get
+      // a match. Only acts when there is a non-empty xterm selection —
+      // otherwise we let the event propagate so the browser/OS still get
+      // their native copy behaviour.
+      if (
+        (e.ctrlKey || e.metaKey) &&
+        !e.altKey &&
+        (e.key === "c" || e.key === "C")
+      ) {
+        const sel = termRef.current?.getSelection() ?? "";
+        if (sel) {
+          e.preventDefault();
+          e.stopPropagation();
+          navigator.clipboard.writeText(sel).catch((err) => {
+            pushToast({ text: `Copy failed: ${err}`, kind: "error" });
+          });
+        }
         return;
       }
       if (e.key === "Escape") {
@@ -270,7 +327,7 @@ export function AgentTile({ agent, isFocused, isMaximized }: Props) {
     };
     node.addEventListener("keydown", onKey, true);
     return () => node.removeEventListener("keydown", onKey, true);
-  }, [searchOpen, menuPos]);
+  }, [searchOpen, menuPos, pushToast]);
 
   // Close context menu on any outside click.
   useEffect(() => {
@@ -300,10 +357,13 @@ export function AgentTile({ agent, isFocused, isMaximized }: Props) {
         agent.agent_type as "kiro-cli" | "claude" | "opencode" | "devin" | "agy" | "codex",
         { autoLayout: false, cwd: agent.cwd },
       );
+      // B-4.3: keep the user focused on the freshly-respawned tile.
+      const wasFocused = useStore.getState().focusedLeafId === agent.id;
       removeAgent(agent.id);
       upsertAgent(a);
       const next = replaceLeafId(layout, agent.id, a.id);
       setLayout(next);
+      if (wasFocused) setFocused(a.id);
       await ipc.updateLayout(currentId, next);
     } catch (err) {
       pushToast({ text: `Respawn failed: ${err}`, kind: "error" });
@@ -361,7 +421,7 @@ export function AgentTile({ agent, isFocused, isMaximized }: Props) {
   const ctxPaste = async () => {
     try {
       const t = await navigator.clipboard.readText();
-      if (t) await ipc.writeToAgent(agent.id, toB64(t));
+      if (t) await ipc.writeToAgent(agent.id, toB64(sanitizeForPty(t)));
     } catch (err) {
       pushToast({ text: `Paste failed: ${err}`, kind: "error" });
     }
@@ -409,7 +469,7 @@ export function AgentTile({ agent, isFocused, isMaximized }: Props) {
     if (parts.length === 0) return;
     const payload = parts.join(" ") + " ";
     try {
-      await ipc.writeToAgent(agent.id, toB64(payload));
+      await ipc.writeToAgent(agent.id, toB64(sanitizeForPty(payload)));
     } catch (err) {
       pushToast({ text: `Drop failed: ${err}`, kind: "error" });
     }

@@ -2,7 +2,7 @@ import { Allotment } from "allotment";
 import "allotment/dist/style.css";
 import { useStore } from "../state/store";
 import { AgentTile } from "./AgentTile";
-import { TaskBoard } from "./TaskBoard";
+import { KanbanBoard } from "./KanbanBoard";
 import { PigMemoryWorkbench } from "./pigmemory/PigMemoryWorkbench";
 import { ipc } from "../state/ipc";
 import { setRatioAt } from "../layout/tree";
@@ -23,12 +23,28 @@ export function TilingArea() {
   const showPigMemory = useStore((s) => s.showPigMemory);
   const setShowPigMemory = useStore((s) => s.setShowPigMemory);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // B-1.1 / H-31: capture the workspaceId the layout belongs to, so a
+  // debounced flush that fires after the user switched workspaces doesn't
+  // overwrite the new workspace's layout with the old one's.
+  const pendingLayoutRef = useRef<{ workspaceId: string; layout: LayoutNode } | null>(null);
   const [rooms, setRooms] = useState<RoomTemplate[]>([]);
   const [roomMenuOpen, setRoomMenuOpen] = useState(false);
 
   useEffect(() => {
     ipc.listRoomTemplates().then(setRooms).catch(() => undefined);
   }, []);
+
+  // B-1.1: when the user switches workspaces, drop any pending debounced
+  // write — that layout belonged to the old workspace, not the new one.
+  useEffect(() => {
+    return () => {
+      if (debounceRef.current) {
+        clearTimeout(debounceRef.current);
+        debounceRef.current = null;
+        pendingLayoutRef.current = null;
+      }
+    };
+  }, [currentId]);
 
   const applyRoom = async (templateId: string) => {
     if (!currentId) return;
@@ -46,9 +62,16 @@ export function TilingArea() {
 
   const persistLayout = (next: LayoutNode) => {
     if (!currentId) return;
+    // B-1.1: snapshot the workspaceId alongside the layout so the deferred
+    // IPC write can't accidentally hit a different workspace.
+    pendingLayoutRef.current = { workspaceId: currentId, layout: next };
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
-      ipc.updateLayout(currentId, next).catch(() => undefined);
+      const pending = pendingLayoutRef.current;
+      debounceRef.current = null;
+      pendingLayoutRef.current = null;
+      if (!pending) return;
+      ipc.updateLayout(pending.workspaceId, pending.layout).catch(() => undefined);
     }, 200);
   };
 
@@ -83,8 +106,16 @@ export function TilingArea() {
           </div>
         );
       }
+      // Force a fresh mount per (workspace, agent). Without this React will
+      // happily reuse the AgentTile instance when the layout tree changes
+      // (e.g. workspace switch reuses an agent_id or just remounts with a
+      // new agent object): xterm.js never re-runs its mount effect, the
+      // scrollback replay is skipped, and the terminal stays sized to the
+      // old ratio. The key makes the old tile unmount → new tile mount
+      // → agentLogTail + FitAddon.fit run cleanly.
       return (
         <AgentTile
+          key={`${currentId ?? "_"}:${agent.id}`}
           agent={agent}
           isFocused={focusedLeafId === agent.id}
           isMaximized={maximizedLeafId === agent.id}
@@ -94,6 +125,11 @@ export function TilingArea() {
     // split
     return (
       <Allotment
+        // B-9.3: stable key per split-path so the Allotment instance
+        // survives a parent re-render unless the tree-shape actually
+        // changed. Without this, every layout setLayout() re-mounts the
+        // Allotment and resets the user's drag.
+        key={`split:${path.join("")}`}
         vertical={node.direction === "h"}
         defaultSizes={[node.ratio * 100, (1 - node.ratio) * 100]}
         onChange={(sizes) => {
@@ -161,8 +197,14 @@ export function TilingArea() {
             maximized: {maximizedLeafId.slice(0, 8)}
           </span>
         </div>
-        <div className="tiling-area-canvas">
+        {/*
+          key forces the maximized AgentTile to remount on workspace switch
+          (xterm.js re-runs its mount effect, scrollback is replayed, and
+          the ResizeObserver is reattached at the new dimensions).
+        */}
+        <div className="tiling-area-canvas" key={currentId ?? "_"}>
           <AgentTile
+            key={`${currentId ?? "_"}:${agents[maximizedLeafId].id}`}
             agent={agents[maximizedLeafId]}
             isFocused
             isMaximized
@@ -224,12 +266,21 @@ export function TilingArea() {
           tiles: {Object.keys(agents).length}
         </span>
       </div>
-      <div className="tiling-area-canvas">
+      {/*
+        key on the canvas forces the Allotment tree to remount on workspace
+        switch. Allotment only honours defaultSizes on first mount, so
+        without this key the new split ratios from ws.layout never take
+        effect and the new AgentTiles keep the previous sizing. The
+        canvas key is also the cheapest way to remount every leaf-level
+        AgentTile (it owns the renderNode tree), which re-runs their
+        xterm mount effect, scrollback replay, and ResizeObserver.
+      */}
+      <div className="tiling-area-canvas" key={currentId ?? "_"}>
         {showTaskBoard ? (
           <Allotment vertical defaultSizes={[60, 40]}>
             <Allotment.Pane minSize={120}>{renderNode(layout)}</Allotment.Pane>
             <Allotment.Pane minSize={160} preferredSize={300}>
-              <TaskBoard />
+              <KanbanBoard />
             </Allotment.Pane>
           </Allotment>
         ) : (

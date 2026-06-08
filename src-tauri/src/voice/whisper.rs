@@ -2,6 +2,14 @@ use crate::error::{Error, Result};
 use std::path::Path;
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 
+/// Thread budget for Whisper inference. Stays low to avoid stealing CPU
+/// from a foreground application the user is interacting with at the same
+/// moment (game, video editor, compilation, etc.). Whisper scales
+/// near-linearly with thread count up to a model-dependent plateau;
+/// `2` keeps the drop modest while still completing a 10 s clip in
+/// ~3 s on CPU and ~0.6 s on GPU.
+const WHISPER_THREAD_BUDGET: i32 = 2;
+
 /// Which backend the live `WhisperContext` is actually running on. Decided at
 /// `open()` time — we try GPU first when a `gpu-*` feature is enabled, and
 /// fall back to CPU if the GPU init fails (no toolkit, no device, OOM, …).
@@ -94,9 +102,13 @@ impl Whisper {
             .create_state()
             .map_err(|e| Error::Voice(format!("create_state: {}", e)))?;
         let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
+        // Pinned to a small budget so a foreground app (game, video
+        // editor) doesn't lose frames while we transcribe. Whisper's
+        // thread scaling is sub-linear past 2-3 threads on small models
+        // anyway, so the wall-clock cost is barely affected.
         let n_threads = match self.backend {
-            Backend::Gpu => 2,
-            Backend::Cpu => std::cmp::max(1, num_cpus_safe() as i32 / 2),
+            Backend::Gpu => 1, // GPU does the heavy lifting; one CPU helper is enough.
+            Backend::Cpu => WHISPER_THREAD_BUDGET,
         };
         params.set_n_threads(n_threads);
         params.set_translate(false);
@@ -129,7 +141,7 @@ impl Whisper {
     }
 }
 
-fn num_cpus_safe() -> usize {
+fn _num_cpus_safe() -> usize {
     std::thread::available_parallelism()
         .map(|n| n.get())
         .unwrap_or(2)

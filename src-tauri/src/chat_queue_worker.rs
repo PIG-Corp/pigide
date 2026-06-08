@@ -12,7 +12,7 @@
 
 use crate::chat_queue;
 use crate::chat_sessions;
-use crate::db::DbPool;
+use crate::db::{spawn_blocking, DbPool};
 use crate::error::Result;
 use crate::orchestrator::Orchestrator;
 use serde_json::json;
@@ -46,24 +46,43 @@ impl ChatQueueWorker {
         self.notify.notify_one();
     }
 
-    /// Snapshot the current session's queue and emit to the UI.
+    /// Snapshot the current session's queue and emit to the UI. Runs the
+    /// rusqlite reads on the blocking pool — the previous inline version
+    /// froze the orchestrator for 1–10 ms per snapshot under load.
     pub fn emit_snapshot(&self) {
-        let session_id = match chat_sessions::ensure_current(&self.db) {
-            Ok(id) => id,
-            Err(_) => return,
-        };
-        let items = chat_queue::list(&self.db, &session_id).unwrap_or_default();
-        let pending = chat_queue::pending_count(&self.db, &session_id).unwrap_or(0);
-        if let Some(app) = self.app.read().as_ref() {
-            let _ = app.emit(
-                chat_queue::QUEUE_EVENT,
-                json!({
-                    "session_id": session_id,
-                    "items": items,
-                    "pending": pending,
-                }),
-            );
-        }
+        let db = self.db.clone();
+        let app = self.app.read().clone();
+        // Best-effort: any DB failure is logged and dropped so a slow /
+        // contended read never blocks the orchestrator's hot path.
+        tauri::async_runtime::spawn(async move {
+            let snapshot = match spawn_blocking(
+                move || -> Result<Option<(String, Vec<chat_queue::QueueItem>, i64)>> {
+                    let session_id = match chat_sessions::ensure_current(&db) {
+                        Ok(id) => id,
+                        Err(_) => return Ok(None),
+                    };
+                    let items = chat_queue::list(&db, &session_id).unwrap_or_default();
+                    let pending = chat_queue::pending_count(&db, &session_id).unwrap_or(0);
+                    Ok(Some((session_id, items, pending)))
+                },
+            )
+            .await
+            {
+                Ok(Some(s)) => s,
+                _ => return,
+            };
+            if let Some(app) = app.as_ref() {
+                let (session_id, items, pending) = snapshot;
+                let _ = app.emit(
+                    chat_queue::QUEUE_EVENT,
+                    json!({
+                        "session_id": session_id,
+                        "items": items,
+                        "pending": pending,
+                    }),
+                );
+            }
+        });
     }
 
     /// Spawn the long-lived worker task. Returns the handle (we don't keep
@@ -101,28 +120,40 @@ impl ChatQueueWorker {
     /// `Ok(())` even if individual turns fail — error policy is governed by
     /// `continue_on_error`. Bubbles up only infrastructure-level failures
     /// (DB unavailable, etc).
+    ///
+    /// Every SQLite call is wrapped in `spawn_blocking` — leaving the
+    /// rusqlite calls inline here would park the entire tokio worker
+    /// thread on disk I/O, blocking the orchestrator's LLM call AND any
+    /// unrelated Tauri command in the meantime. `claim_next` and
+    /// `ensure_current` share one blocking call because they both touch
+    /// the same short transaction inside `claim_next`.
     async fn drain_once(&self) -> Result<()> {
         loop {
-            let session_id = chat_sessions::ensure_current(&self.db)?;
-            let item = match chat_queue::claim_next(&self.db, &session_id)? {
+            let db = self.db.clone();
+            let claimed = spawn_blocking(move || -> Result<Option<chat_queue::QueueItem>> {
+                let session_id = chat_sessions::ensure_current(&db)?;
+                chat_queue::claim_next(&db, &session_id)
+            })
+            .await?;
+            let item = match claimed {
                 Some(it) => it,
                 None => return Ok(()),
             };
             // The queue snapshot now shows item.status='processing'.
             self.emit_snapshot();
 
-            let res = self
-                .orch
-                .clone()
-                .run_chat(item.text.clone())
-                .await;
+            let res = self.orch.clone().run_chat(item.text.clone()).await;
             match res {
                 Ok(()) => {
-                    let _ = chat_queue::mark_done(&self.db, &item.id);
+                    let db = self.db.clone();
+                    let id = item.id.clone();
+                    let _ = spawn_blocking(move || chat_queue::mark_done(&db, &id)).await;
                 }
                 Err(e) => {
                     tracing::error!("orchestrator turn failed: {}", e);
-                    let _ = chat_queue::mark_failed(&self.db, &item.id);
+                    let db = self.db.clone();
+                    let id = item.id.clone();
+                    let _ = spawn_blocking(move || chat_queue::mark_failed(&db, &id)).await;
                     if !chat_queue::continue_on_error(&self.db) {
                         self.emit_snapshot();
                         return Ok(());

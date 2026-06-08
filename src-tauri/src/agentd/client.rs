@@ -96,11 +96,7 @@ impl AgentClient {
 
     /// Test hook: build a client over an arbitrary AsyncRead/AsyncWrite
     /// pair (e.g. `tokio::io::duplex`).
-    pub async fn from_io<R, W>(
-        reader: R,
-        writer: W,
-        hello_timeout: Duration,
-    ) -> Result<Self>
+    pub async fn from_io<R, W>(reader: R, writer: W, hello_timeout: Duration) -> Result<Self>
     where
         R: AsyncRead + Unpin + Send + 'static,
         W: AsyncWrite + Unpin + Send + 'static,
@@ -301,10 +297,12 @@ impl AgentClient {
         match resp.result {
             ResponseBody::LogTail { data_b64 } => Ok(base64::engine::general_purpose::STANDARD
                 .decode(&data_b64)
-                .map_err(|e| ClientError::Encode(serde_json::Error::io(std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    e.to_string(),
-                ))))?),
+                .map_err(|e| {
+                    ClientError::Encode(serde_json::Error::io(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        e.to_string(),
+                    )))
+                })?),
             ResponseBody::Error { code, message } => Err(ClientError::Broker { code, message }),
             _ => Err(ClientError::UnexpectedShape("log_tail")),
         }
@@ -539,10 +537,15 @@ mod tests {
         let (tx, rx) = oneshot::channel();
         pending.lock().insert(1, tx);
         out_tx
-            .send(serde_json::to_string(&Request {
-                id: 1,
-                op: Op::Hello { client_version: 999 },
-            }).unwrap())
+            .send(
+                serde_json::to_string(&Request {
+                    id: 1,
+                    op: Op::Hello {
+                        client_version: 999,
+                    },
+                })
+                .unwrap(),
+            )
             .await
             .unwrap();
         let resp = rx.await.unwrap();

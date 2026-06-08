@@ -98,6 +98,11 @@ export function MemoryPanel({ onClose }: { onClose?: () => void }) {
   };
 
   const closeNote = () => {
+    // B-3.8: prompt the user before discarding unsaved edits, matching the
+    // behaviour we already use when switching to a different note.
+    if (isDirty.current) {
+      if (!confirm("Unsaved changes will be lost. Close anyway?")) return;
+    }
     isDirty.current = false;
     setOpenId(null);
     setOpenNote(null);

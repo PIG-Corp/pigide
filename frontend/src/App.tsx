@@ -10,8 +10,10 @@ import { OrchestratorPanel } from "./components/OrchestratorPanel";
 import { VoicePill } from "./components/voice/VoicePill";
 import { HotkeyBindings } from "./components/HotkeyBindings";
 import { SettingsButton } from "./components/SettingsButton";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import { useStore } from "./state/store";
 import { useThemeBootstrap } from "./themes/useTheme";
+import type { Task } from "./state/types";
 import {
   ipc,
   onAgentExit,
@@ -29,6 +31,7 @@ import {
   onChatScopeChanged,
 } from "./state/ipc";
 import { closeLeaf } from "./layout/tree";
+import { injectVoiceTranscript } from "./voice/inject";
 
 export default function App() {
   const setWorkspaces = useStore((s) => s.setWorkspaces);
@@ -55,14 +58,47 @@ export default function App() {
   // corrupt state — each switch increments the id; stale continuations bail out.
   const switchIdRef = useRef(0);
 
+  // B-9.1: chat-chunk coalescer. The streaming model emits ~60 chunks/sec;
+  // we buffer deltas per message id and flush on a 50 ms timer so the store
+  // receives ~20 setState calls instead of ~60, and each call only walks
+  // the chat array once for a 1-element update.
+  const chunkBufRef = useRef<Map<string, string>>(new Map());
+  const chunkTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scheduleChunk = (id: string, delta: string) => {
+    chunkBufRef.current.set(id, (chunkBufRef.current.get(id) ?? "") + delta);
+    if (chunkTimerRef.current) return;
+    chunkTimerRef.current = setTimeout(() => {
+      chunkTimerRef.current = null;
+      const buf = chunkBufRef.current;
+      chunkBufRef.current = new Map();
+      for (const [mid, d] of buf) {
+        appendChatChunk(mid, d);
+      }
+    }, 50);
+  };
+  const clearWorkspaceState = useStore((s) => s.clearWorkspaceState);
+
   // Helper used by the workspace://changed handler when the orchestrator
   // creates/switches a workspace under us. Note: chat is GLOBAL, not reloaded.
+  //
+  // Important ordering:
+  //   1. Bump switchId so any in-flight reload bails out.
+  //   2. Wipe workspace-scoped state (agents/layout/leaf ids) so the canvas
+  //      does not keep rendering nodes pointing at agents of the OLD ws while
+  //      we await the backend.
+  //   3. Fetch the new workspace + agents in order, checking switchId between
+  //      every await so a faster switch cancels this one cleanly.
   async function reloadAfterSwitch(newId: string) {
     const switchId = ++switchIdRef.current;
     try {
       const list = await ipc.listWorkspaces();
       if (switchIdRef.current !== switchId) return;
       setWorkspaces(list);
+      // Drop everything from the previous workspace BEFORE swapping the id so
+      // maximized/focused leaves don't briefly resolve to agents of the wrong
+      // workspace (or leak across switches). We don't touch chat / voice /
+      // tasks-state here — only canvas/leaf ids.
+      clearWorkspaceState();
       setCurrent(newId);
       const ws = await ipc.getWorkspace(newId);
       if (switchIdRef.current !== switchId) return;
@@ -70,6 +106,11 @@ export default function App() {
       const agents = await ipc.listAgents(newId);
       if (switchIdRef.current !== switchId) return;
       setAgents(agents);
+      // B-3.3: also reload tasks so the TasksCard in OrchestratorPanel does
+      // not briefly display tasks from the previous workspace.
+      const tasks = await ipc.listTasks({ workspace_id: newId }).catch(() => [] as Task[]);
+      if (switchIdRef.current !== switchId) return;
+      useStore.getState().setTasks(tasks);
     } catch (err) {
       console.error("reloadAfterSwitch", err);
     }
@@ -176,7 +217,9 @@ export default function App() {
       upsertChat(m);
     }));
     track(onChatChunk((e) => {
-      appendChatChunk(e.id, e.delta);
+      // B-9.1: coalesce streaming chunks within a 50 ms window so a 60 fps
+      // stream doesn't cause 60 setState calls (each O(n) on chat.length).
+      scheduleChunk(e.id, e.delta);
     }));
     track(onChatStatus((e) => {
       setOrchestratorStatus(e.state);
@@ -200,7 +243,12 @@ export default function App() {
       setVoiceState(e.state);
     }));
     track(onVoiceTranscript((e) => {
-      if (e.text) appendDraftInput(e.text);
+      if (e.text) {
+        // Route per `voiceTarget` (focused-tile by default). injectVoiceTranscript
+        // handles stale focusedLeafId / dead agents by falling back to the
+        // orchestrator draft and surfacing a toast.
+        void injectVoiceTranscript(e.text);
+      }
     }));
     track(onVoiceDownload((e) => {
       setVoiceDownload({ bytes: e.bytes, total: e.total });
@@ -238,6 +286,15 @@ export default function App() {
     return () => {
       disposed = true;
       unsubs.forEach((u) => u());
+      // B-9.1: drain + cancel the chunk coalescer timer so we don't fire a
+      // setState after unmount.
+      if (chunkTimerRef.current) {
+        clearTimeout(chunkTimerRef.current);
+        chunkTimerRef.current = null;
+      }
+      const buf = chunkBufRef.current;
+      chunkBufRef.current = new Map();
+      for (const [mid, d] of buf) appendChatChunk(mid, d);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -256,13 +313,19 @@ export default function App() {
       <HotkeyBindings />
       <Allotment defaultSizes={[220, 600, 320]}>
         <Allotment.Pane minSize={160} preferredSize={220}>
-          <WorkspaceSidebar />
+          <ErrorBoundary label="Sidebar">
+            <WorkspaceSidebar />
+          </ErrorBoundary>
         </Allotment.Pane>
         <Allotment.Pane minSize={300}>
-          <TilingArea />
+          <ErrorBoundary label="Tiling Area">
+            <TilingArea />
+          </ErrorBoundary>
         </Allotment.Pane>
         <Allotment.Pane minSize={260} preferredSize={320}>
-          <OrchestratorPanel />
+          <ErrorBoundary label="Orchestrator">
+            <OrchestratorPanel />
+          </ErrorBoundary>
         </Allotment.Pane>
       </Allotment>
 
@@ -270,11 +333,15 @@ export default function App() {
 
       <div className="toast-wrap" role="status" aria-live="polite">
         {toasts.map((t) => (
+          // B-8.1: each toast declares its own live region. `aria-live` on
+          // the parent is "polite", so info toasts won't interrupt
+          // speech; we override with `assertive` on error toasts.
           <div
             key={t.id}
             className={`toast ${t.kind}`}
             onClick={() => dismissToast(t.id)}
-            role="alert"
+            role={t.kind === "error" ? "alert" : "status"}
+            aria-live={t.kind === "error" ? "assertive" : "polite"}
           >
             {t.text}
           </div>

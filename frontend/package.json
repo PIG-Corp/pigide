@@ -8,7 +8,9 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "test:helpers": "node scripts/test-helpers.mjs"
+    "test:helpers": "node scripts/test-helpers.mjs",
+    "test:sanitize": "node scripts/test-markdown-sanitize.mjs",
+    "test": "node scripts/test-helpers.mjs && node scripts/test-markdown-sanitize.mjs"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.20.2",

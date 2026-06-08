@@ -19,6 +19,12 @@ use rusqlite::params;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+/// Maximum number of not-yet-finished (`queued` + `processing`) messages a
+/// single session may hold. Bounds the SQLite table against a runaway
+/// frontend (or scripted caller) spamming `send_chat` faster than the
+/// single-consumer worker drains it.
+const MAX_PENDING_PER_SESSION: i64 = 100;
+
 /// Status of a queued message.
 ///
 /// Lifecycle: `queued` -> `processing` -> (deleted on success or `failed`).
@@ -147,6 +153,21 @@ pub fn enqueue_with_attachments(
         if prev_text == trimmed {
             return Err(Error::Invalid("duplicate of previous message".into()));
         }
+    }
+    // Bound the pending backlog so a runaway caller can't fill the table.
+    let pending: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM chat_queue
+             WHERE session_id=?1 AND status IN ('queued','processing')",
+            [session_id],
+            |r| r.get(0),
+        )
+        .unwrap_or(0);
+    if pending >= MAX_PENDING_PER_SESSION {
+        return Err(Error::Invalid(format!(
+            "chat queue is full ({} pending); wait for messages to process",
+            pending
+        )));
     }
     let next_pos: i64 = conn
         .query_row(
@@ -359,6 +380,24 @@ mod tests {
         // semantics tight: we check ONLY the most recent pending row.
         assert!(enqueue(&p, "s1", "world").is_err());
         assert!(enqueue(&p, "s1", "hello").is_ok());
+    }
+
+    #[test]
+    fn enqueue_rejects_when_session_backlog_full() {
+        let p = test_pool();
+        // Fill to the cap with distinct, non-duplicate text.
+        for i in 0..super::MAX_PENDING_PER_SESSION {
+            enqueue(&p, "s1", &format!("msg {}", i)).unwrap();
+        }
+        assert_eq!(
+            pending_count(&p, "s1").unwrap() as i64,
+            super::MAX_PENDING_PER_SESSION
+        );
+        // One more must be rejected.
+        let err = enqueue(&p, "s1", "overflow").err().unwrap();
+        assert!(err.to_string().contains("full"));
+        // A different session is unaffected by s1's backlog.
+        assert!(enqueue(&p, "s2", "fresh").is_ok());
     }
 
     #[test]

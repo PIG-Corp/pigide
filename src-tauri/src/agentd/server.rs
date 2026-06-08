@@ -21,7 +21,9 @@
 //!   the request loop AND Stdout/Exit from the subscribe task funnel
 //!   into the same writer task, so frames never interleave mid-line.
 
-use crate::agentd::engine::{Engine, EngineError, EngineEvent, SpawnRequest, DEFAULT_READINESS_TIMEOUT};
+use crate::agentd::engine::{
+    Engine, EngineError, EngineEvent, SpawnRequest, DEFAULT_READINESS_TIMEOUT,
+};
 use crate::agentd::framing::{read_frame_async, write_frame_async};
 use crate::agentd::proto::{
     ErrorCode, Event, HelloResponse, Op, Request, Response, ResponseBody, PROTOCOL_VERSION,
@@ -464,7 +466,9 @@ mod tests {
             &mut bw,
             &Request {
                 id: 1,
-                op: Op::Hello { client_version: 999 },
+                op: Op::Hello {
+                    client_version: 999,
+                },
             },
         )
         .await;
@@ -536,15 +540,13 @@ mod tests {
         let mut got_exit = false;
         let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
         while tokio::time::Instant::now() < deadline && !(got_stdout && got_exit) {
-            let line = match tokio::time::timeout(
-                Duration::from_millis(500),
-                read_frame_async(&mut br),
-            )
-            .await
-            {
-                Ok(Ok(Some(l))) => l,
-                _ => continue,
-            };
+            let line =
+                match tokio::time::timeout(Duration::from_millis(500), read_frame_async(&mut br))
+                    .await
+                {
+                    Ok(Ok(Some(l))) => l,
+                    _ => continue,
+                };
             // It can be a Response or an Event; try Event first.
             if let Ok(ev) = serde_json::from_str::<Event>(&line) {
                 match ev {

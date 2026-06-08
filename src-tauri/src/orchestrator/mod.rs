@@ -1,4 +1,7 @@
+pub mod budget;
 pub mod client;
+pub mod fence;
+pub mod meter;
 pub mod phantom;
 pub mod prompt;
 pub mod providers;
@@ -40,7 +43,16 @@ pub struct Orchestrator {
     skills: Arc<SkillRegistry>,
     resolver: Arc<ResolverService>,
     app: RwLock<Option<AppHandle>>,
-    pub abort_trigger: parking_lot::Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
+    /// In-flight cancellation handles, keyed by a monotonic turn id. A single
+    /// slot used to be silently clobbered when a second `run_chat` started
+    /// concurrently — the first turn then became uncancellable. Keying by id
+    /// lets every concurrent turn register its own handle; `stop_chat` fires
+    /// all of them.
+    abort_triggers: parking_lot::Mutex<BTreeMap<u64, tokio::sync::oneshot::Sender<()>>>,
+    abort_seq: std::sync::atomic::AtomicU64,
+    /// Process-global LLM spend/rate meter (H2). Checked before each provider
+    /// call so a runaway loop brakes instead of burning unbounded credits.
+    meter: meter::Meter,
 }
 
 impl Orchestrator {
@@ -62,12 +74,42 @@ impl Orchestrator {
             skills,
             resolver,
             app: RwLock::new(None),
-            abort_trigger: parking_lot::Mutex::new(None),
+            abort_triggers: parking_lot::Mutex::new(BTreeMap::new()),
+            abort_seq: std::sync::atomic::AtomicU64::new(0),
+            meter: meter::Meter::new(),
         }
     }
 
     pub fn set_app_handle(&self, app: AppHandle) {
         *self.app.write() = Some(app);
+    }
+
+    /// Register a cancel handle for an in-flight turn. Returns the turn id
+    /// the caller must pass to [`Self::clear_abort`] when the turn ends.
+    fn register_abort(&self, tx: tokio::sync::oneshot::Sender<()>) -> u64 {
+        let id = self
+            .abort_seq
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.abort_triggers.lock().insert(id, tx);
+        id
+    }
+
+    /// Drop the cancel handle for a finished turn (no-op if already fired).
+    fn clear_abort(&self, id: u64) {
+        self.abort_triggers.lock().remove(&id);
+    }
+
+    /// Fire every registered cancel handle. Returns how many in-flight turns
+    /// were signalled. Idempotent — handles are consumed on send.
+    pub fn cancel_all(&self) -> usize {
+        let drained = std::mem::take(&mut *self.abort_triggers.lock());
+        let mut n = 0;
+        for (_id, tx) in drained {
+            if tx.send(()).is_ok() {
+                n += 1;
+            }
+        }
+        n
     }
 
     fn build_provider(&self) -> Arc<dyn LlmProvider> {
@@ -140,7 +182,10 @@ impl Orchestrator {
             let marker = if w.id == current_id { "*" } else { "-" };
             s.push_str(&format!(
                 "  {} id={} name={:?} agents={}\n",
-                marker, w.id, w.name, w.agent_count
+                marker,
+                w.id,
+                fence::neutralize(&w.name),
+                w.agent_count
             ));
         }
         s.push_str("agents (across all workspaces):\n");
@@ -171,7 +216,10 @@ impl Orchestrator {
                     for t in tasks.iter().take(20) {
                         s.push_str(&format!(
                             "  - id={} status={} title={:?} agent={:?}\n",
-                            t.id, t.status, t.title, t.agent_id
+                            t.id,
+                            t.status,
+                            fence::neutralize(&t.title),
+                            t.agent_id
                         ));
                     }
                     if tasks.len() > 20 {
@@ -201,7 +249,7 @@ impl Orchestrator {
         //    smart-lane refreshes it after every pass.
         if let Some(hot) = crate::memory::ingest::hot::read_body(&self.memory, workspace_id) {
             out.push_str("\n\n[MEMORY HOT — recent working set]\n");
-            out.push_str(&hot);
+            out.push_str(&fence::neutralize(&hot));
         }
         // 2. FTS hits keyed off the user's latest message.
         let hits = self.memory.search(workspace_id, user_text, 3).ok()?;
@@ -213,7 +261,7 @@ impl Orchestrator {
                     "- [[{}]] (score {:.2}): {}\n",
                     h.slug,
                     h.score,
-                    h.snippet.replace('\n', " ")
+                    fence::neutralize(&h.snippet.replace('\n', " "))
                 ));
             }
         }
@@ -260,7 +308,11 @@ impl Orchestrator {
             }
             if m.role == "tool" {
                 let tool_name = lookup_tool_name(&history, m.tool_call_id.as_deref());
-                let body = truncate_for_model(&m.content, 4000);
+                // Tool output is untrusted (agent stdout, file contents,
+                // mailbox bodies, …). Neutralize injection markers so a
+                // result can't forge a section header or role turn, then
+                // truncate.
+                let body = truncate_for_model(&fence::neutralize(&m.content), 4000);
                 let label = tool_name
                     .map(|n| format!("[Tool result of {}]\n{}", n, body))
                     .unwrap_or_else(|| format!("[Tool result]\n{}", body));
@@ -322,6 +374,13 @@ impl Orchestrator {
                 "role": "system",
                 "content": phantom::RETRY_NAG,
             }));
+        }
+        // Compact the history so a long agent-heavy session never blows past
+        // the model's context window. Drops oldest `[Tool result]` payloads
+        // first, preserving the system head + the most recent exchange.
+        let (msgs, compacted) = budget::compact(msgs, &budget::Budget::default(), 4);
+        if compacted {
+            tracing::info!("orchestrator: context compacted to fit token budget");
         }
         Ok(msgs)
     }
@@ -392,6 +451,21 @@ impl Orchestrator {
             let messages =
                 self.build_messages(session_id, last_user_text.as_deref(), phantom_nag)?;
 
+            // 1b. Global spend/rate gate (H2). Estimate this call's token cost
+            //     and reserve against the rolling 60s window BEFORE we touch
+            //     the provider. On breach we error out of the loop — the
+            //     caller surfaces it to the user — instead of burning more.
+            //     Done here (before the placeholder insert) so a rejection
+            //     leaves no orphan assistant bubble to clean up.
+            {
+                let est = meter::estimate_request_tokens(&messages, tools);
+                let (max_req, max_tok) = meter::caps(&self.db);
+                if let Err(reason) = self.meter.check_and_reserve(est, max_req, max_tok) {
+                    tracing::warn!("orchestrator: spend cap hit: {}", reason);
+                    return Err(crate::error::Error::Orchestrator(reason));
+                }
+            }
+
             // 2. Insert an empty assistant placeholder so the UI can stream
             //    text deltas into a bubble.
             let mut placeholder =
@@ -416,7 +490,7 @@ impl Orchestrator {
                 }
             });
             let (cancel_tx, mut cancel_rx) = tokio::sync::oneshot::channel::<()>();
-            *self.abort_trigger.lock() = Some(cancel_tx);
+            let abort_id = self.register_abort(cancel_tx);
 
             let stream_result = tokio::select! {
                 res = provider.chat_stream(req, delta_tx) => res,
@@ -425,7 +499,7 @@ impl Orchestrator {
                     Err(crate::error::Error::Orchestrator("generation stopped by user".into()))
                 }
             };
-            *self.abort_trigger.lock() = None;
+            self.clear_abort(abort_id);
 
             let _ = forwarder.await;
             let assembled = match stream_result {

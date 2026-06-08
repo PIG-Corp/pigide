@@ -1,7 +1,7 @@
 //! Russian → Latin transliteration + diacritic stripping.
 //!
 //! Used to normalize both queries and project signals before fuzzy
-//! comparison so that "наркотики" can match "narkotiki" / "drugs".
+//! comparison so that "виджеты" can match "vidzhety" / "widget".
 
 /// Transliterate any Cyrillic / accented characters in `s` to plain ASCII.
 /// Non-Cyrillic characters are passed through unchanged.
@@ -70,7 +70,7 @@ mod tests {
 
     #[test]
     fn russian_words() {
-        assert_eq!(transliterate("наркотики"), "narkotiki");
+        assert_eq!(transliterate("виджеты"), "narkotiki");
         assert_eq!(transliterate("плагин"), "plagin");
         assert_eq!(transliterate("Привет, Мир!"), "privet, mir!");
     }
@@ -92,8 +92,8 @@ mod tests {
     #[test]
     fn ascii_passthrough() {
         assert_eq!(
-            transliterate("drugs-tracker-plugin"),
-            "drugs-tracker-plugin"
+            transliterate("widget-plugin"),
+            "widget-plugin"
         );
         assert_eq!(transliterate("PigIDE 2.0"), "PigIDE 2.0");
     }

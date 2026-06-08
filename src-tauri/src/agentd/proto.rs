@@ -90,10 +90,7 @@ pub struct Response {
 #[serde(tag = "event", rename_all = "snake_case")]
 pub enum Event {
     /// New PTY output. `data_b64` is base64-encoded raw bytes.
-    Stdout {
-        agent_id: String,
-        data_b64: String,
-    },
+    Stdout { agent_id: String, data_b64: String },
     /// Agent's PTY closed (child exited or was killed). After this, the
     /// `agent_id` is no longer valid for `Write` / `Resize`. The DB row
     /// will be marked `exited` unless the broker is in shutdown mode.
@@ -157,10 +154,7 @@ pub enum Op {
     List { workspace_id: String },
 
     /// Last `max_bytes` of the per-agent PTY log (xterm scrollback replay).
-    LogTail {
-        agent_id: String,
-        max_bytes: usize,
-    },
+    LogTail { agent_id: String, max_bytes: usize },
 
     /// How long ago did this agent last produce stdout? Used by the
     /// orchestrator's `wait_for_agent_idle` heuristic. Returns `None`-shaped
@@ -321,7 +315,12 @@ mod tests {
         // Round-trips cleanly.
         let back: Request = serde_json::from_str(&s).unwrap();
         match back.op {
-            Op::Spawn { workspace_id, bin_path, env, .. } => {
+            Op::Spawn {
+                workspace_id,
+                bin_path,
+                env,
+                ..
+            } => {
                 assert_eq!(workspace_id, "ws1");
                 assert_eq!(bin_path, "/usr/local/bin/claude");
                 assert_eq!(env.len(), 1);
@@ -403,7 +402,9 @@ mod tests {
         };
         let r = Response {
             id: 9,
-            result: ResponseBody::Spawn { agent: info.clone() },
+            result: ResponseBody::Spawn {
+                agent: info.clone(),
+            },
         };
         let s = serde_json::to_string(&r).unwrap();
         let back: Response = serde_json::from_str(&s).unwrap();
@@ -428,7 +429,9 @@ mod tests {
         };
         let r = Response {
             id: 3,
-            result: ResponseBody::List { agents: vec![info.clone()] },
+            result: ResponseBody::List {
+                agents: vec![info.clone()],
+            },
         };
         let s = serde_json::to_string(&r).unwrap();
         let back: Response = serde_json::from_str(&s).unwrap();
@@ -461,7 +464,10 @@ mod tests {
         let saved = std::env::var("XDG_RUNTIME_DIR").ok();
         std::env::set_var("XDG_RUNTIME_DIR", "/run/user/1000");
         let p = default_socket_path();
-        assert_eq!(p, std::path::PathBuf::from("/run/user/1000/pigide/agentd.sock"));
+        assert_eq!(
+            p,
+            std::path::PathBuf::from("/run/user/1000/pigide/agentd.sock")
+        );
         match saved {
             Some(v) => std::env::set_var("XDG_RUNTIME_DIR", v),
             None => std::env::remove_var("XDG_RUNTIME_DIR"),

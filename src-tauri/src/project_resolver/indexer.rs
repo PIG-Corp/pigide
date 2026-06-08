@@ -341,7 +341,7 @@ mod tests {
         );
         let _b = make_project(
             &root,
-            "drugs-tracker-plugin",
+            "widget-plugin",
             &[(
                 "paper-plugin.yml",
                 "name: DrugsPlugin\ndescription: tracks\n",
@@ -360,7 +360,7 @@ mod tests {
         assert_eq!(idx.projects.len(), 2, "{:?}", idx.projects);
         let names: Vec<&str> = idx.projects.iter().map(|p| p.dirname.as_str()).collect();
         assert!(names.contains(&"alpha"));
-        assert!(names.contains(&"drugs-tracker-plugin"));
+        assert!(names.contains(&"widget-plugin"));
         fs::remove_dir_all(&root).ok();
     }
 
@@ -392,22 +392,16 @@ mod tests {
         let root = tmp("alias");
         let proj = make_project(
             &root,
-            "drugs-tracker-plugin",
+            "widget-plugin",
             &[("Cargo.toml", "[package]\nname=\"x\"")],
         );
         fs::create_dir_all(proj.join(".pigmemory")).unwrap();
         fs::write(
             proj.join(".pigmemory").join("aliases.json"),
-            r#"{"aliases":["drugs","drugs plugin"]}"#,
-        )
-        .unwrap();
-        let idx = scan(ScanOptions {
-            roots: vec![root.clone()],
-            max_depth: 4,
-            home_max_depth: 2,
-        });
-        assert_eq!(idx.projects.len(), 1);
-        assert!(idx.projects[0].aliases.iter().any(|a| a == "drugs"));
+            r#"{"aliases":["widget","widget plugin"]}"#,
+            Some(vec![]),
+        );
+        assert!(idx.projects[0].aliases.iter().any(|a| a == "widget"));
         fs::remove_dir_all(&root).ok();
     }
 

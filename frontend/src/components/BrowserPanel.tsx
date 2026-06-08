@@ -168,7 +168,14 @@ export function BrowserPanel({ onClose }: { onClose?: () => void }) {
           <iframe
             ref={iframeRef}
             src={url}
-            sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-downloads allow-presentation"
+            // B-6.6: tightened sandbox. The previous flags granted the
+            // iframe same-origin access (cookies / localStorage on the
+            // Tauri origin) and arbitrary popups + downloads. We keep
+            // scripts + forms (so the user can log into most sites) and
+            // explicitly drop allow-same-origin / allow-popups /
+            // allow-top-navigation. Downloads remain on so the user can
+            // save a file when a site offers it.
+            sandbox="allow-scripts allow-forms allow-downloads allow-presentation"
             referrerPolicy="no-referrer"
             title="browser"
           />

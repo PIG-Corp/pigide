@@ -1,6 +1,6 @@
 use crate::agent::AgentType;
 use crate::chat::ChatMessage;
-use crate::db::{self};
+use crate::db::{self, spawn_blocking};
 use crate::layout::LayoutNode;
 use crate::memory::note::Note;
 use crate::memory::service::{Backlink, GraphData, NoteSummary, SearchHit};
@@ -236,7 +236,10 @@ pub async fn list_agents(
     state: State<'_, AppState>,
     workspace_id: String,
 ) -> std::result::Result<Vec<crate::agent::Agent>, String> {
-    state.agent_mgr.list(&workspace_id).map_err(Into::into)
+    let mgr = state.agent_mgr.clone();
+    spawn_blocking(move || mgr.list(&workspace_id))
+        .await
+        .map_err(|e| e.to_string())
 }
 
 /// Return base64-encoded tail of an agent's PTY log (up to `max_bytes`,
@@ -248,10 +251,13 @@ pub async fn agent_log_tail(
     agent_id: String,
     max_bytes: Option<usize>,
 ) -> std::result::Result<String, String> {
-    let bytes = state
-        .agent_mgr
-        .read_log_tail(&agent_id, max_bytes.unwrap_or(64 * 1024))
-        .map_err(Into::<String>::into)?;
+    // Disk read; do not block the tokio worker.
+    let max = max_bytes.unwrap_or(64 * 1024);
+    let mgr = state.agent_mgr.clone();
+    let id = agent_id;
+    let bytes = spawn_blocking(move || mgr.read_log_tail(&id, max))
+        .await
+        .map_err(|e| e.to_string())?;
     Ok(base64::engine::general_purpose::STANDARD.encode(bytes))
 }
 
@@ -271,7 +277,10 @@ pub async fn list_chat(
     state: State<'_, AppState>,
 ) -> std::result::Result<Vec<ChatMessage>, String> {
     let session_id = crate::chat_sessions::ensure_current(&state.db).map_err(|e| e.to_string())?;
-    crate::chat::list(&state.db, &session_id, 200).map_err(Into::into)
+    let db = state.db.clone();
+    spawn_blocking(move || crate::chat::list(&db, &session_id, 200))
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[derive(Deserialize)]
@@ -332,7 +341,10 @@ pub async fn list_chat_queue(
     state: State<'_, AppState>,
 ) -> std::result::Result<Vec<crate::chat_queue::QueueItem>, String> {
     let session_id = crate::chat_sessions::ensure_current(&state.db).map_err(|e| e.to_string())?;
-    crate::chat_queue::list(&state.db, &session_id).map_err(Into::into)
+    let db = state.db.clone();
+    spawn_blocking(move || crate::chat_queue::list(&db, &session_id))
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -390,13 +402,8 @@ pub async fn clear_chat(state: State<'_, AppState>) -> std::result::Result<(), S
 /// `chat://status idle` so the UI re-enables input.
 #[tauri::command]
 pub async fn stop_chat(state: State<'_, AppState>) -> std::result::Result<bool, String> {
-    let mut trigger = state.orchestrator.abort_trigger.lock();
-    if let Some(tx) = trigger.take() {
-        let _ = tx.send(());
-        Ok(true)
-    } else {
-        Ok(false)
-    }
+    let cancelled = state.orchestrator.cancel_all();
+    Ok(cancelled > 0)
 }
 
 // ---------- Chat sessions ----------
@@ -548,11 +555,28 @@ pub struct SetSettingArgs {
     pub value: String,
 }
 
+/// Setting-key prefixes that select which binary/argv PigIDE will exec when
+/// spawning a CLI agent (`bin.claude=/path`, `args.claude=...`, `wsl.claude`).
+/// Letting the webview write these turns any XSS into arbitrary local code
+/// execution, so the webview-facing `set_setting` command refuses them. The
+/// orchestrator / MCP tooling write settings via `db::set_setting` directly
+/// and are unaffected by this gate.
+fn is_execution_sensitive_setting(key: &str) -> bool {
+    let k = key.trim().to_ascii_lowercase();
+    k.starts_with("bin.") || k.starts_with("args.") || k.starts_with("wsl.")
+}
+
 #[tauri::command]
 pub async fn set_setting(
     state: State<'_, AppState>,
     args: SetSettingArgs,
 ) -> std::result::Result<(), String> {
+    if is_execution_sensitive_setting(&args.key) {
+        return Err(format!(
+            "setting '{}' controls binary execution and cannot be changed from the UI",
+            args.key
+        ));
+    }
     db::set_setting(&state.db, &args.key, &args.value).map_err(Into::into)
 }
 
@@ -568,10 +592,19 @@ pub async fn get_setting(
 
 #[derive(serde::Serialize)]
 pub struct ProviderInfo {
+    /// Provider label, e.g. "omnirouter" or the user-chosen custom label.
     pub provider: String,
+    /// "openai" | "anthropic" | "builtin" — used by the UI to pick an icon
+    /// and to know which secrets slot the row's API key lives in.
+    pub kind: String,
     pub primary_model: String,
     pub fallback_model: Option<String>,
     pub has_api_key: bool,
+    /// Custom-provider label when an active row exists, so the UI can show
+    /// both the user-chosen name (e.g. "My OpenRouter") and the model id.
+    pub custom_label: Option<String>,
+    /// Base URL of the active custom provider, if any.
+    pub base_url: Option<String>,
 }
 
 /// Return the current architect provider configuration so the settings UI
@@ -580,12 +613,45 @@ pub struct ProviderInfo {
 pub async fn provider_info(
     state: State<'_, AppState>,
 ) -> std::result::Result<ProviderInfo, String> {
+    use crate::orchestrator::providers::registry;
     let provider = crate::orchestrator::providers::build_provider(&state.db);
+    let active_id = registry::active_id(&state.db);
+    if active_id.is_empty() {
+        return Ok(ProviderInfo {
+            provider: provider.label().to_string(),
+            kind: "builtin".to_string(),
+            primary_model: provider.primary_model().to_string(),
+            fallback_model: provider.fallback_model().map(|s| s.to_string()),
+            has_api_key: true,
+            custom_label: None,
+            base_url: None,
+        });
+    }
+    let row = match crate::db::get_custom_provider(&state.db, &active_id) {
+        Ok(Some(r)) => r,
+        _ => {
+            return Ok(ProviderInfo {
+                provider: provider.label().to_string(),
+                kind: "builtin".to_string(),
+                primary_model: provider.primary_model().to_string(),
+                fallback_model: provider.fallback_model().map(|s| s.to_string()),
+                has_api_key: false,
+                custom_label: None,
+                base_url: None,
+            });
+        }
+    };
+    let has_key =
+        crate::secrets::has_secret(&state.db, &crate::secrets::provider_key_name(&row.id))
+            .unwrap_or(false);
     Ok(ProviderInfo {
         provider: provider.label().to_string(),
+        kind: row.kind,
         primary_model: provider.primary_model().to_string(),
         fallback_model: provider.fallback_model().map(|s| s.to_string()),
-        has_api_key: true,
+        has_api_key: has_key,
+        custom_label: Some(row.label),
+        base_url: Some(row.base_url),
     })
 }
 
@@ -597,6 +663,148 @@ pub async fn provider_test_connection(
 ) -> std::result::Result<crate::orchestrator::providers::PingInfo, String> {
     let provider = crate::orchestrator::providers::build_provider(&state.db);
     provider.ping().await.map_err(Into::into)
+}
+
+// ---------- Custom API providers ----------
+
+use crate::orchestrator::providers::registry;
+
+#[tauri::command]
+pub async fn provider_list(
+    state: State<'_, AppState>,
+) -> std::result::Result<Vec<registry::ProviderView>, String> {
+    registry::list(&state.db).map_err(Into::into)
+}
+
+#[derive(Deserialize)]
+pub struct ProviderCreateArgs {
+    pub label: String,
+    /// "openai" | "anthropic".
+    pub kind: String,
+    pub base_url: String,
+    #[serde(default)]
+    pub api_key: Option<String>,
+}
+
+#[tauri::command]
+pub async fn provider_create(
+    state: State<'_, AppState>,
+    app: tauri::AppHandle,
+    args: ProviderCreateArgs,
+) -> std::result::Result<registry::ProviderView, String> {
+    let view = registry::create(
+        &state.db,
+        &args.label,
+        &args.kind,
+        &args.base_url,
+        args.api_key.as_deref(),
+    )
+    .map_err(|e| e.to_string())?;
+    registry::emit_provider_changed(&app);
+    Ok(view)
+}
+
+#[derive(Deserialize)]
+pub struct ProviderUpdateArgs {
+    pub id: String,
+    pub label: String,
+    pub base_url: String,
+    #[serde(default)]
+    pub model: String,
+    /// Non-empty to rotate the key; empty/absent leaves the stored key intact.
+    #[serde(default)]
+    pub api_key: Option<String>,
+}
+
+#[tauri::command]
+pub async fn provider_update(
+    state: State<'_, AppState>,
+    app: tauri::AppHandle,
+    args: ProviderUpdateArgs,
+) -> std::result::Result<registry::ProviderView, String> {
+    let view = registry::update(
+        &state.db,
+        &args.id,
+        &args.label,
+        &args.base_url,
+        &args.model,
+        args.api_key.as_deref(),
+    )
+    .map_err(|e| e.to_string())?;
+    registry::emit_provider_changed(&app);
+    Ok(view)
+}
+
+#[tauri::command]
+pub async fn provider_delete(
+    state: State<'_, AppState>,
+    app: tauri::AppHandle,
+    id: String,
+) -> std::result::Result<(), String> {
+    registry::delete(&state.db, &id).map_err(|e| e.to_string())?;
+    registry::emit_provider_changed(&app);
+    Ok(())
+}
+
+#[derive(Deserialize)]
+pub struct ProviderSetModelArgs {
+    pub id: String,
+    pub model: String,
+}
+
+#[tauri::command]
+pub async fn provider_set_model(
+    state: State<'_, AppState>,
+    app: tauri::AppHandle,
+    args: ProviderSetModelArgs,
+) -> std::result::Result<registry::ProviderView, String> {
+    let view = registry::set_model(&state.db, &args.id, &args.model).map_err(|e| e.to_string())?;
+    registry::emit_provider_changed(&app);
+    Ok(view)
+}
+
+#[tauri::command]
+pub async fn provider_set_active(
+    state: State<'_, AppState>,
+    app: tauri::AppHandle,
+    id: String,
+) -> std::result::Result<(), String> {
+    registry::set_active(&state.db, &id).map_err(|e| e.to_string())?;
+    registry::emit_provider_changed(&app);
+    Ok(())
+}
+
+/// Fetch the model list for a stored provider, using its saved key. Returns
+/// the model ids, or an `Err` with a friendly message the UI can show inline.
+#[tauri::command]
+pub async fn provider_fetch_models(
+    state: State<'_, AppState>,
+    id: String,
+) -> std::result::Result<Vec<registry::ModelEntry>, String> {
+    registry::fetch_models_for(&state.db, &id)
+        .await
+        .map_err(Into::into)
+}
+
+#[derive(Deserialize)]
+pub struct ProviderProbeArgs {
+    pub kind: String,
+    pub base_url: String,
+    #[serde(default)]
+    pub api_key: Option<String>,
+}
+
+/// Probe an endpoint for models BEFORE the provider is saved — powers the
+/// "Fetch models" button in the add-provider form.
+#[tauri::command]
+pub async fn provider_probe_models(
+    _state: State<'_, AppState>,
+    args: ProviderProbeArgs,
+) -> std::result::Result<Vec<registry::ModelEntry>, String> {
+    let kind = registry::ProviderKind::parse(&args.kind).map_err(|e| e.to_string())?;
+    registry::fetch_models(kind, &args.base_url, args.api_key.as_deref())
+        .await
+        .map_err(Into::into)
 }
 
 // ---------- Voice ----------
@@ -794,6 +1002,24 @@ pub async fn mcp_start(
     });
     let port = args.port.unwrap_or(20129);
     let host = if args.bind_all {
+        // Binding 0.0.0.0 exposes the MCP JSON-RPC surface (spawn_agent,
+        // file tools, etc.) to the LAN. Require an explicit opt-in setting
+        // so a webview-origin caller can't quietly flip it. Default off.
+        let allowed = db::get_setting(&state.db, "mcp.allow_bind_all")
+            .ok()
+            .flatten()
+            .map(|v| v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false);
+        if !allowed {
+            return Err(
+                "binding all interfaces is disabled; set 'mcp.allow_bind_all=true' to enable"
+                    .to_string(),
+            );
+        }
+        tracing::warn!(
+            "MCP server binding 0.0.0.0:{} — JSON-RPC surface is reachable from the LAN",
+            port
+        );
         [0, 0, 0, 0]
     } else {
         [127, 0, 0, 1]
@@ -871,6 +1097,11 @@ pub async fn mcp_register_cwd(
     if !p.is_dir() {
         return Err(format!("not a directory: {}", cwd));
     }
+    // Validate + canonicalise: absolute, no traversal, existing dir, not a
+    // protected system root. This file write embeds the MCP bearer token,
+    // so we must not let a webview-origin caller drop it just anywhere.
+    let canon = crate::workspace::validate_dir_path(&cwd).map_err(|e| e.to_string())?;
+    let p = std::path::PathBuf::from(canon);
     let changed = crate::mcp::launcher::merge_project_mcp_json(&state.db, &state.mcp, &p)
         .map_err(|e| e.to_string())?;
     Ok(McpRegisterCwdResult {
@@ -935,12 +1166,16 @@ pub async fn list_dir(
     path: String,
 ) -> std::result::Result<Vec<crate::files::DirEntry>, String> {
     let roots = current_workspace_roots(state.inner()).map_err(Into::<String>::into)?;
-    crate::files::list_dir(&path, &roots).map_err(Into::into)
+    spawn_blocking(move || crate::files::list_dir(&path, &roots))
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub async fn browse_dir(path: String) -> std::result::Result<Vec<crate::files::DirEntry>, String> {
-    crate::files::browse_dir_unrestricted(&path).map_err(|e| e.to_string())
+    spawn_blocking(move || crate::files::browse_dir_unrestricted(&path))
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -956,7 +1191,9 @@ pub async fn read_file(
     path: String,
 ) -> std::result::Result<String, String> {
     let roots = current_workspace_roots(state.inner()).map_err(Into::<String>::into)?;
-    crate::files::read_file(&path, &roots).map_err(Into::into)
+    spawn_blocking(move || crate::files::read_file(&path, &roots))
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[derive(Deserialize)]
@@ -971,7 +1208,9 @@ pub async fn write_file(
     args: WriteFileArgs,
 ) -> std::result::Result<(), String> {
     let roots = current_workspace_roots(state.inner()).map_err(Into::<String>::into)?;
-    crate::files::write_file(&args.path, &args.content, &roots).map_err(Into::into)
+    spawn_blocking(move || crate::files::write_file(&args.path, &args.content, &roots))
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[derive(Deserialize)]
@@ -987,7 +1226,11 @@ pub async fn walk_files(
     args: WalkFilesArgs,
 ) -> std::result::Result<Vec<crate::files::DirEntry>, String> {
     let roots = current_workspace_roots(state.inner()).map_err(Into::<String>::into)?;
-    crate::files::walk_files(&args.root, args.max_files.unwrap_or(2000), &roots).map_err(Into::into)
+    let max = args.max_files.unwrap_or(2000);
+    let root = args.root;
+    spawn_blocking(move || crate::files::walk_files(&root, max, &roots))
+        .await
+        .map_err(|e| e.to_string())
 }
 
 // ---------- Tasks ----------
@@ -1021,14 +1264,16 @@ pub async fn list_tasks(
     args: Option<ListTasksArgs>,
 ) -> std::result::Result<Vec<Task>, String> {
     let args = args.unwrap_or_default();
-    state
-        .task_mgr
-        .list(
+    let mgr = state.task_mgr.clone();
+    spawn_blocking(move || {
+        mgr.list(
             args.workspace_id.as_deref(),
             args.status.as_deref(),
             args.agent_id.as_deref(),
         )
-        .map_err(Into::into)
+    })
+    .await
+    .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -1177,14 +1422,16 @@ pub async fn list_memories(
     state: State<'_, AppState>,
     args: ListMemoriesArgs,
 ) -> std::result::Result<Vec<NoteSummary>, String> {
-    state
-        .memory
-        .list(
+    let memory = state.memory.clone();
+    spawn_blocking(move || {
+        memory.list(
             &args.workspace_id,
             args.tag.as_deref(),
             args.limit.unwrap_or(50),
         )
-        .map_err(Into::into)
+    })
+    .await
+    .map_err(|e| e.to_string())
 }
 
 #[derive(Deserialize)]
@@ -1200,10 +1447,10 @@ pub async fn search_memories(
     state: State<'_, AppState>,
     args: SearchMemoriesArgs,
 ) -> std::result::Result<Vec<SearchHit>, String> {
-    state
-        .memory
-        .search(&args.workspace_id, &args.query, args.limit.unwrap_or(10))
-        .map_err(Into::into)
+    let memory = state.memory.clone();
+    spawn_blocking(move || memory.search(&args.workspace_id, &args.query, args.limit.unwrap_or(10)))
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -1978,9 +2225,12 @@ pub async fn add_project_alias(
     state: State<'_, AppState>,
     args: ProjectAliasArgs,
 ) -> std::result::Result<Vec<String>, String> {
+    // `add_alias` writes `<path>/.pigmemory/aliases.json`, so validate the
+    // directory first (absolute, existing, no traversal, not a system root).
+    let canon = crate::workspace::validate_dir_path(&args.path).map_err(|e| e.to_string())?;
     state
         .resolver
-        .add_alias(&std::path::PathBuf::from(&args.path), &args.alias)
+        .add_alias(&std::path::PathBuf::from(canon), &args.alias)
         .map_err(Into::into)
 }
 
@@ -1993,4 +2243,27 @@ pub async fn remove_project_alias(
         .resolver
         .remove_alias(&std::path::PathBuf::from(&args.path), &args.alias)
         .map_err(Into::into)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_execution_sensitive_setting;
+
+    #[test]
+    fn blocks_execution_sensitive_keys() {
+        assert!(is_execution_sensitive_setting("bin.claude"));
+        assert!(is_execution_sensitive_setting("args.claude"));
+        assert!(is_execution_sensitive_setting("wsl.claude"));
+        assert!(is_execution_sensitive_setting("BIN.Claude")); // case-insensitive
+        assert!(is_execution_sensitive_setting("  bin.kiro-cli "));
+    }
+
+    #[test]
+    fn allows_normal_keys() {
+        assert!(!is_execution_sensitive_setting("voice.record_mode"));
+        assert!(!is_execution_sensitive_setting("browser.last_url"));
+        assert!(!is_execution_sensitive_setting("mcp.autostart"));
+        assert!(!is_execution_sensitive_setting("architect.enabled"));
+        assert!(!is_execution_sensitive_setting("theme"));
+    }
 }

@@ -104,8 +104,7 @@ pub fn list(db: &DbPool, filter: &ListFilter) -> Result<Vec<ChatSession>> {
     let mut out = Vec::new();
     match (&filter.scope, &filter.workspace_id) {
         (None, _) => {
-            let mut stmt =
-                conn.prepare(&format!("{} ORDER BY s.updated_at DESC", SELECT_BASE))?;
+            let mut stmt = conn.prepare(&format!("{} ORDER BY s.updated_at DESC", SELECT_BASE))?;
             for row in stmt.query_map([], row_to_session)? {
                 out.push(row?);
             }
@@ -240,8 +239,7 @@ pub fn set_scope(db: &DbPool, scope: ChatScope) -> Result<()> {
 }
 
 pub fn current_workspace_id(db: &DbPool) -> Result<Option<String>> {
-    Ok(crate::db::get_setting(db, "current_workspace_id")?
-        .filter(|s| !s.is_empty()))
+    Ok(crate::db::get_setting(db, "current_workspace_id")?.filter(|s| !s.is_empty()))
 }
 
 /// Resolve which (scope, workspace_id, pointer-key) tuple to use right now.

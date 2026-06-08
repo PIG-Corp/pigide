@@ -2,9 +2,9 @@
 
 Open or switch a workspace from a fuzzy natural-language hint:
 
-> "open the drugs plugin" → `~/code/drugs-tracker-plugin/`
-> "переключи на pigide" → `/home/camer/pigide`
-> "drug plgn" / "наркотики плагин" → same project as the first one.
+ > "open the widget plugin" → `~/code/widget-plugin/`
+> "переключи на pigide" → `~/pigide`
+> "wdgt plgn" / "виджет плагин" → same project as the first one.
 
 The resolver is the bridge between **what the user says to the orchestrator**
 and the **directory on disk** that should become the active workspace.
@@ -40,22 +40,22 @@ Stored at `~/.cache/pigide/project-index.json`:
 {
   "version": 1,
   "built_at": "2026-05-17T09:00:00Z",
-  "roots": ["/home/camer/code", "/home/camer/projects", "/home/camer"],
+  "roots": ["~/code", "~/projects", "~"],
   "projects": [
     {
-      "path": "/home/camer/code/drugs-tracker-plugin",
-      "dirname": "drugs-tracker-plugin",
-      "kind": ["git", "java"],
-      "names": ["DrugsTrackerPlugin"],     // package.json#name, Cargo, pyproject, go.mod
-      "descriptions": ["Track drugs..."],   // package.json#description, Cargo description
-      "headings": ["Drugs Plugin"],          // README h1/h2
-      "remote": "github.com/example/drugs-tracker-plugin",
-      "languages": ["java"],
+      "path": "~/code/widget-plugin",
+      "dirname": "widget-plugin",
+      "kind": ["git", "rust"],
+      "names": ["WidgetPlugin"],
+      "descriptions": ["Example widget plugin"],
+      "headings": ["Widget Plugin"],
+      "remote": "github.com/example/widget-plugin",
+      "languages": ["rust"],
       "mtime": 1720000000,
       "alias_paths": [".pigmemory/aliases.json"]
     }
   ],
-  "aliases": { "/home/camer/code/drugs-tracker-plugin": ["drugs", "drugs plugin"] }
+  "aliases": { "~/code/widget-plugin": ["widget", "widget plugin"] }
 }
 ```
 
@@ -153,7 +153,7 @@ score(q, s) = max(
 `token_set_ratio` is the rapidfuzz definition: split both sides on
 non-alphanumeric, lowercased, sorted, then `jaro_winkler` of the
 intersection plus differences. This is what makes
-"drug plgn" match "drugs-tracker-plugin" — the order of tokens
+"wdgt plgn" match "widget-plugin" — the order of tokens
 does not matter and a missing token just costs you ~0.15.
 
 ### Transliteration
@@ -161,7 +161,7 @@ does not matter and a missing token just costs you ~0.15.
 Russian → Latin via a fixed table in `translit.rs`:
 `а→a, б→b, …, ш→sh, щ→shch, ы→y, ё→e`. Same module also strips
 common diacritics. Both query and signals are transliterated before
-scoring, so "наркотики" produces tokens like `narkotiki`.
+scoring, so "виджеты" produces tokens like `vidzhety`.
 
 ## Aliases
 
@@ -169,7 +169,7 @@ scoring, so "наркотики" produces tokens like `narkotiki`.
 
 ```json
 {
-  "/home/camer/code/drugs-tracker-plugin": ["drugs", "drugs plugin", "наркоплаг"]
+  "~/code/widget-plugin": ["widget", "widget plugin"]
 }
 ```
 
@@ -178,8 +178,8 @@ directory itself, not in the workspace store, so they survive workspace
 recreation. The orchestrator exposes `remember_project_alias` so users can
 teach the resolver mid-conversation:
 
-> user: "btw open that as 'drugs plugin' in the future"
-> orchestrator: `remember_project_alias { path, alias: "drugs plugin" }`
+> user: "btw open that as 'widget plugin' in the future"
+> orchestrator: `remember_project_alias { path, alias: "widget plugin" }`
 
 ## Orchestrator integration
 

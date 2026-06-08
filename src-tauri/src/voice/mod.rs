@@ -23,11 +23,22 @@ use tauri::{AppHandle, Emitter};
 pub struct VoicePipeline {
     db: DbPool,
     capture: Arc<capture::Capture>,
-    whisper: Mutex<HashMap<String, Arc<whisper::Whisper>>>,
+    /// Loaded whisper contexts, capped at MAX_LOADED_MODELS so the
+    /// process can't OOM when the user toggles between whisper sizes.
+    /// Each `large`/`medium` model is 1.5 GB on CPU; LRU eviction keeps
+    /// memory bounded during long editing sessions and when the user
+    /// keeps switching providers.
+    whisper: Mutex<HashMap<String, (Arc<whisper::Whisper>, Instant)>>,
     last_emit: Mutex<Option<(String, Instant)>>,
     generation: Arc<AtomicU64>,
     app: RwLock<Option<AppHandle>>,
 }
+
+/// Hard cap on the number of whisper models held in RAM simultaneously.
+/// The hot path is "one model at a time" — we keep at most two (the
+/// current + the previous) so a `voice_set_model` swap doesn't have to
+/// re-load from disk if the user toggles back and forth.
+const MAX_LOADED_MODELS: usize = 2;
 
 impl VoicePipeline {
     pub fn new(db: DbPool) -> Self {
@@ -121,10 +132,29 @@ impl VoicePipeline {
         let whisper = {
             let mut slot = self.whisper.lock();
             let key = model_id.as_str().to_string();
-            if !slot.contains_key(&key) {
+            // Touch the LRU timestamp on a hit, evict cold entries when
+            // we're at capacity, then load on miss. Eviction drops the
+            // `Arc` — when the last reference is gone, the model memory
+            // is freed.
+            if let Some((_, ts)) = slot.get_mut(&key) {
+                *ts = Instant::now();
+            } else {
                 match whisper::Whisper::open(&model_path, &key) {
                     Ok(w) => {
-                        slot.insert(key.clone(), Arc::new(w));
+                        // LRU eviction: drop the oldest entry if adding
+                        // a new one would exceed the cap.
+                        while slot.len() >= MAX_LOADED_MODELS {
+                            if let Some(oldest_key) = slot
+                                .iter()
+                                .min_by_key(|(_, (_, ts))| *ts)
+                                .map(|(k, _)| k.clone())
+                            {
+                                slot.remove(&oldest_key);
+                            } else {
+                                break;
+                            }
+                        }
+                        slot.insert(key.clone(), (Arc::new(w), Instant::now()));
                     }
                     Err(e) => {
                         drop(slot);
@@ -136,14 +166,25 @@ impl VoicePipeline {
                     }
                 }
             }
-            slot.get(&key).unwrap().clone()
+            slot.get(&key).unwrap().0.clone()
         };
 
         let resampled = capture::resample_to_16k(&samples, src_rate);
         let lang = language.clone();
-        let result = tokio::task::spawn_blocking(move || whisper.transcribe(&resampled, &lang))
-            .await
-            .unwrap_or_else(|e| Err(crate::error::Error::Voice(format!("blocking: {}", e))));
+        // Run on the blocking pool. We mark the closure with a
+        // `defer!` to drop our own OS-thread priority hint right
+        // after the inference returns — a no-op on Windows and a
+        // `setpriority(PRIO_PROCESS, 0, +nice)` on Linux/macOS,
+        // which tells the scheduler to prefer the user's
+        // foreground app (game, video editor) over our transcription
+        // thread. The `nice` value is positive = lower priority.
+        let result = tokio::task::spawn_blocking(move || {
+            #[cfg(unix)]
+            let _prio_guard = VoicePriorityGuard::new();
+            whisper.transcribe(&resampled, &lang)
+        })
+        .await
+        .unwrap_or_else(|e| Err(crate::error::Error::Voice(format!("blocking: {}", e))));
 
         if !is_current() {
             tracing::info!(
@@ -209,6 +250,45 @@ impl VoicePipeline {
                 .values()
                 .any(|w| w.is_focused().unwrap_or(false)),
             None => false,
+        }
+    }
+}
+
+/// RAII guard that nudges the current OS thread toward *lower* priority
+/// while a whisper inference is running, and restores the previous
+/// value on drop. Why: when a user is gaming or running another GPU-
+/// heavy foreground app, our transcription thread can steal CPU from
+/// the render loop and cause visible stutter. `nice +5` is enough to
+/// surrender a few CPU cores' worth of contention without making the
+/// transcription feel sluggish.
+///
+/// This is best-effort — on platforms where the syscall isn't available
+/// the guard is a no-op and the inference runs at default priority
+/// (which is already capped at 2 CPU threads by `WHISPER_THREAD_BUDGET`).
+#[cfg(unix)]
+struct VoicePriorityGuard {
+    prev: i32,
+}
+
+#[cfg(unix)]
+impl VoicePriorityGuard {
+    fn new() -> Self {
+        let prev = unsafe { libc::getpriority(libc::PRIO_PROCESS, 0) };
+        // Bump niceness. range is -20..19; we set to +5 = "below normal
+        // interactive, above idle". Failure to setpriority is harmless
+        // (likely EACCES in a sandbox), so we swallow it.
+        unsafe {
+            let _ = libc::setpriority(libc::PRIO_PROCESS, 0, 5);
+        }
+        Self { prev }
+    }
+}
+
+#[cfg(unix)]
+impl Drop for VoicePriorityGuard {
+    fn drop(&mut self) {
+        unsafe {
+            let _ = libc::setpriority(libc::PRIO_PROCESS, 0, self.prev);
         }
     }
 }

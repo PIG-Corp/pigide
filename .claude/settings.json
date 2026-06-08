@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 /home/camer/pigide/.claude/hooks/protect-sensitive.py"
+            "command": "python3 .claude/hooks/protect-sensitive.py"
           }
         ]
       }
@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 /home/camer/pigide/.claude/hooks/cargo-fmt.py"
+            "command": "python3 .claude/hooks/cargo-fmt.py"
           }
         ]
       }

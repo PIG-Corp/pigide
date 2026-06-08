@@ -94,7 +94,9 @@ export const useArchitectStore = create<ArchitectStore>((set) => ({
   setSignals: (m) => set({ signals: m }),
   pushDecision: (d) =>
     set((s) => ({
-      decisions: [...s.decisions.slice(-199), d],
+      // B-9.7: bumped cap from 199 → 999 so a long-running session
+      // doesn't silently drop earlier Architect decisions from the log.
+      decisions: [...s.decisions.slice(-999), d],
     })),
   setDecisions: (list) => set({ decisions: list }),
 }));

@@ -228,7 +228,7 @@ mod tests {
             std::env::temp_dir().join(format!("pigide-resolver-svc-{}", uuid::Uuid::new_v4()));
         fs::create_dir_all(&dir).unwrap();
         // One real project on disk.
-        let proj = dir.join("drugs-tracker-plugin");
+        let proj = dir.join("widget-plugin");
         fs::create_dir_all(&proj).unwrap();
         fs::write(proj.join("Cargo.toml"), "[package]\nname=\"x\"").unwrap();
 
@@ -244,15 +244,15 @@ mod tests {
             max_depth: 4,
             home_max_depth: 2,
         });
-        let r = svc.resolve("наркотики", None);
+        let r = svc.resolve("виджеты", None);
         // Without an alias the cyrillic query won't find it.
         assert!(matches!(
             r.status,
             crate::project_resolver::ResolveStatus::NotFound
         ));
 
-        svc.add_alias(&proj, "наркотики").unwrap();
-        let r2 = svc.resolve("наркотики", None);
+        svc.add_alias(&proj, "виджеты").unwrap();
+        let r2 = svc.resolve("виджеты", None);
         assert!(matches!(
             r2.status,
             crate::project_resolver::ResolveStatus::Found

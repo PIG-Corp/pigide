@@ -189,7 +189,10 @@ async fn handle_rpc(
     let key: Option<KeyInfo> = match presented {
         Some(t) => match auth::validate(&state.db, &t) {
             Ok(k) => k,
-            Err(e) => return error_response(req.id, -32000, &format!("auth error: {}", e)),
+            Err(e) => {
+                tracing::warn!("MCP auth validation error: {}", e);
+                return error_response(req.id, -32000, "auth error");
+            }
         },
         None => None,
     };
@@ -365,15 +368,18 @@ async fn dispatch_tool(
             }))
         }
         Err(e) => {
-            let msg = e.to_string();
+            // Full detail goes to the audit log (operator-visible); the
+            // client gets a sanitised message so fs paths / DB internals
+            // from infrastructure errors don't leak over the wire.
+            let internal = e.to_string();
             audit(
                 &state.db,
                 key.as_ref(),
                 &name,
                 &arguments,
-                &format!("err:{}", msg),
+                &format!("err:{}", internal),
             );
-            Err((-32603, msg))
+            Err((-32603, e.client_safe_message()))
         }
     }
 }

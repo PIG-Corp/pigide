@@ -7,7 +7,12 @@ import {
   useState,
 } from "react";
 import { useStore } from "../state/store";
-import { ipc } from "../state/ipc";
+import { ipc, onProviderChanged } from "../state/ipc";
+// B-9.2: shallow-equal selector so chat updates don't re-render the
+// whole OrchestratorPanel on every streaming chunk. In zustand 5 the
+// hook-style shallow wrapper is `useShallow`; `shallow` is a plain
+// equality function (not a hook).
+import { useShallow } from "zustand/react/shallow";
 import {
   Send,
   Square,
@@ -42,7 +47,7 @@ const ICON_SIZE_TASKS = 14;
 const ICON_SIZE_TASKS_EXPAND = 13;
 
 export function OrchestratorPanel() {
-  const chat = useStore((s) => s.chat);
+  const chat = useStore(useShallow((s) => s.chat));
   const status = useStore((s) => s.orchestratorStatus);
   const draft = useStore((s) => s.draftInput);
   const setDraft = useStore((s) => s.setDraftInput);
@@ -70,6 +75,35 @@ export function OrchestratorPanel() {
   const listRef = useRef<HTMLDivElement | null>(null);
   const taRef = useRef<MentionTextareaHandle | null>(null);
   const userScrolledUp = useRef(false);
+
+  // Current model badge — refreshed on mount and whenever the backend fires
+  // `provider://changed` (after a set_active / set_model / update / create /
+  // delete). Lets the user see at a glance which model is wired up.
+  const [providerInfo, setProviderInfo] =
+    useState<Awaited<ReturnType<typeof ipc.providerInfo>> | null>(null);
+  useEffect(() => {
+    let dead = false;
+    const reload = () => {
+      ipc.providerInfo()
+        .then((info) => {
+          if (!dead) setProviderInfo(info);
+        })
+        .catch(() => {});
+    };
+    reload();
+    // B-1.2: unlisten immediately if the promise resolves after unmount.
+    const un = onProviderChanged(() => {
+      if (dead) return;
+      reload();
+    });
+    un.then((f) => {
+      if (dead) f();
+    });
+    return () => {
+      dead = true;
+      void un.then((f) => f());
+    };
+  }, []);
 
   // Track whether the user has manually scrolled up, so auto-scroll doesn't
   // yank them back to the bottom while they're reading earlier messages.
@@ -180,6 +214,24 @@ export function OrchestratorPanel() {
         <div className="orchestrator-header">
           <span className="accent-dot" aria-hidden="true" />
           <span className="orchestrator-title">PigIDE</span>
+          {providerInfo && (
+            <span
+              className={`orchestrator-model-pill orchestrator-model-pill--${providerInfo.kind}`}
+              title={
+                providerInfo.base_url
+                  ? `${providerInfo.base_url} • ${providerInfo.primary_model}`
+                  : providerInfo.primary_model
+              }
+            >
+              <span className="orchestrator-model-pill__label">
+                {providerInfo.custom_label ?? providerInfo.provider}
+              </span>
+              <span className="orchestrator-model-pill__sep">·</span>
+              <span className="orchestrator-model-pill__model">
+                {providerInfo.primary_model}
+              </span>
+            </span>
+          )}
           <span className="spacer" />
           <button
             type="button"
@@ -342,6 +394,9 @@ const BridgeOrb = memo(function BridgeOrb({
   voiceState: VoiceState;
   status: string;
 }) {
+  const voiceTarget = useStore((s) => s.voiceTarget);
+  const setVoiceTarget = useStore((s) => s.setVoiceTarget);
+  const toggleVoiceTarget = useStore((s) => s.toggleVoiceTarget);
   const onOrbClick = async () => {
     try {
       if (voiceState === "transcribing") {
@@ -376,6 +431,9 @@ const BridgeOrb = memo(function BridgeOrb({
         title={orbTitle}
         aria-label={orbTitle}
         aria-pressed={isRecording}
+        // B-8.3: transcribing is a busy state — announce it so screen
+        // readers know the orb is doing work, not accepting input.
+        aria-busy={isTranscribing || undefined}
       >
         <div className="bridge-orb__aura bridge-orb__aura--outer" aria-hidden="true" />
         <div className="bridge-orb__aura bridge-orb__aura--mid" aria-hidden="true" />
@@ -394,7 +452,9 @@ const BridgeOrb = memo(function BridgeOrb({
           <>
             <span className="orb-status-active recording">Recording</span>
             <span className="orb-speaking-sep"> | </span>
-            <span className="orb-speaking-right">Listening to user</span>
+            <span className="orb-speaking-right">
+              Listening to user · → {voiceTarget === "focused-tile" ? "focused tile" : "orchestrator"}
+            </span>
           </>
         ) : voiceState === "transcribing" ? (
           <>
@@ -422,6 +482,11 @@ const BridgeOrb = memo(function BridgeOrb({
           </>
         )}
       </div>
+      <VoiceTargetToggle
+        value={voiceTarget}
+        onChange={setVoiceTarget}
+        onToggle={toggleVoiceTarget}
+      />
     </div>
   );
 });
@@ -833,3 +898,71 @@ function VoiceIconButton({ voiceState }: { voiceState: VoiceState }) {
     </button>
   );
 }
+
+/// Voice routing toggle — where a freshly-transcribed voice message will land.
+/// Compact two-segment switcher below the BridgeOrb; "focused-tile" is the
+/// default and matches the user's expected behaviour (dictate → live tile).
+const VoiceTargetToggle = memo(function VoiceTargetToggle({
+  value,
+  onChange,
+  onToggle,
+}: {
+  value: "focused-tile" | "orchestrator";
+  onChange: (v: "focused-tile" | "orchestrator") => void;
+  onToggle: () => void;
+}) {
+  const focused = useStore((s) => s.focusedLeafId);
+  const agents = useStore((s) => s.agents);
+  // Show a short hint of the focused agent (or warn that none is focused).
+  const focusedAgent = focused ? agents[focused] : null;
+  const focusedShort = focusedAgent
+    ? `${focusedAgent.agent_type}·${focusedAgent.id.slice(0, 6)}`
+    : "—";
+
+  return (
+    <div
+      className="voice-target-toggle"
+      role="group"
+      aria-label="Voice transcript target"
+      title="Where the next voice transcript will be sent (Ctrl+Shift+V to toggle)"
+    >
+      <span className="voice-target-toggle__label">Voice →</span>
+      <button
+        type="button"
+        className={`voice-target-toggle__opt ${
+          value === "focused-tile" ? "active" : ""
+        }`}
+        onClick={() => onChange("focused-tile")}
+        aria-pressed={value === "focused-tile"}
+        title={
+          value === "focused-tile"
+            ? `Focused tile: ${focusedShort}`
+            : "Send next voice transcript to the focused agent tile"
+        }
+        disabled={value === "focused-tile" && !focusedAgent}
+      >
+        focused tile
+      </button>
+      <button
+        type="button"
+        className={`voice-target-toggle__opt ${
+          value === "orchestrator" ? "active" : ""
+        }`}
+        onClick={() => onChange("orchestrator")}
+        aria-pressed={value === "orchestrator"}
+        title="Send next voice transcript to the orchestrator chat draft"
+      >
+        orchestrator
+      </button>
+      <button
+        type="button"
+        className="voice-target-toggle__swap"
+        onClick={onToggle}
+        title="Swap voice target (Ctrl+Shift+V)"
+        aria-label="Swap voice target"
+      >
+        ⇄
+      </button>
+    </div>
+  );
+});

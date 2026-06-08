@@ -42,6 +42,11 @@ export function useTheme(): { theme: Theme; setTheme: (id: string) => void } {
  * notify subscribers. Safe to call from <App>'s top useEffect.
  */
 export function useThemeBootstrap(): void {
+  // B-3.10: apply the default theme synchronously on mount so the very
+  // first render paints with correct CSS vars (no flash of unstyled /
+  // mismatched theme). The async block below upgrades to the persisted
+  // choice when the IPC answer arrives.
+  applyThemeToDom(getTheme(currentId));
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -49,12 +54,17 @@ export function useThemeBootstrap(): void {
         const stored = await ipc.getSetting(SETTING_KEY);
         if (cancelled) return;
         const id = stored?.trim() ? stored : DEFAULT_THEME_ID;
+        if (id === currentId) return;
         currentId = id;
         applyThemeToDom(getTheme(id));
         emit();
       } catch {
-        applyThemeToDom(getTheme(DEFAULT_THEME_ID));
-        emit();
+        if (cancelled) return;
+        if (currentId !== DEFAULT_THEME_ID) {
+          currentId = DEFAULT_THEME_ID;
+          applyThemeToDom(getTheme(DEFAULT_THEME_ID));
+          emit();
+        }
       }
     })();
     return () => {

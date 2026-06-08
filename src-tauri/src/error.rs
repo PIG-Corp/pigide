@@ -57,4 +57,61 @@ impl From<Error> for String {
     }
 }
 
+impl Error {
+    /// A message safe to hand to a remote/untrusted caller (e.g. an MCP
+    /// client). App-level variants carry intentional, useful text (a missing
+    /// workspace id, a bad argument). Infrastructure variants (`Io`, `Db`,
+    /// `Pool`, `Http`, `Json`, `Tauri`) can embed filesystem paths, SQL, or
+    /// other internal detail, so those are collapsed to a generic string —
+    /// the caller logs the real error separately for operators.
+    pub fn client_safe_message(&self) -> String {
+        match self {
+            Error::NotFound(_)
+            | Error::Invalid(_)
+            | Error::Orchestrator(_)
+            | Error::Agent(_)
+            | Error::Voice(_) => self.to_string(),
+            Error::Io(_)
+            | Error::Db(_)
+            | Error::Pool(_)
+            | Error::Http(_)
+            | Error::Json(_)
+            | Error::Tauri(_)
+            | Error::Uuid(_)
+            | Error::Base64(_)
+            | Error::Other(_) => "internal error".to_string(),
+        }
+    }
+}
+
 pub type Result<T> = std::result::Result<T, Error>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn app_level_errors_pass_through() {
+        assert_eq!(
+            Error::NotFound("workspace abc".into()).client_safe_message(),
+            "not found: workspace abc"
+        );
+        assert_eq!(
+            Error::Invalid("bad arg".into()).client_safe_message(),
+            "invalid input: bad arg"
+        );
+    }
+
+    #[test]
+    fn infra_errors_are_redacted() {
+        let io = Error::Io(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "/home/secret/path/db.sqlite missing",
+        ));
+        assert_eq!(io.client_safe_message(), "internal error");
+        assert_eq!(
+            Error::Other("/etc/passwd detail".into()).client_safe_message(),
+            "internal error"
+        );
+    }
+}

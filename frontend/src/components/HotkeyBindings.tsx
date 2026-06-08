@@ -4,8 +4,13 @@ import { useStore } from "../state/store";
 import { ipc } from "../state/ipc";
 import { closeLeaf, splitLeaf } from "../layout/tree";
 import type { SplitDir } from "../state/types";
+import { useSwitchWorkspace } from "../state/useSwitchWorkspace";
 
 export function HotkeyBindings(): null {
+  // B-3.3: switch uses the shared hook so it can't drift from the sidebar
+  // path. (Inline `useStore.getState().setTasks(...)` here used to be
+  // missing from the sidebar — see FRONTEND_BUGS.md 3.3.)
+  const switchWorkspace = useSwitchWorkspace();
   const map = useMemo<HotkeyMap>(() => {
     const newWorkspace = () => {
       useStore.getState().setNewWorkspaceModalOpen(true);
@@ -57,34 +62,17 @@ export function HotkeyBindings(): null {
       }
     };
 
-    const switchWorkspace = (idx: number) => async () => {
+    const switchWorkspaceByIdx = (idx: number) => () => {
       const state = useStore.getState();
       const ws = state.workspaces[idx];
       if (!ws) return;
       if (ws.id === state.currentId) return;
-      try {
-        state.clearWorkspaceState();
-        await ipc.setCurrentWorkspace(ws.id);
-        // Backend doesn't emit workspace://changed for set_current; pull
-        // the new state ourselves.
-        state.setCurrent(ws.id);
-        const fresh = await ipc.getWorkspace(ws.id);
-        state.setLayout(fresh.layout);
-        const agents = await ipc.listAgents(ws.id);
-        state.setAgents(agents);
-        const tasks = await ipc.listTasks({ workspace_id: ws.id });
-        state.setTasks(tasks);
-      } catch (err) {
-        state.pushToast({
-          text: `Failed to switch workspace: ${err}`,
-          kind: "error",
-        });
-      }
+      void switchWorkspace(ws.id);
     };
 
     const toggleKanban = () => {
       const state = useStore.getState();
-      state.setShowKanban(!state.showKanban);
+      state.setShowTaskBoard(!state.showTaskBoard);
     };
 
     const restoreFromMaximize = () => {
@@ -105,10 +93,10 @@ export function HotkeyBindings(): null {
       escape: restoreFromMaximize,
     };
     for (let i = 1; i <= 9; i += 1) {
-      bindings[`ctrl+${i}`] = switchWorkspace(i - 1);
+      bindings[`ctrl+${i}`] = switchWorkspaceByIdx(i - 1);
     }
     return bindings;
-  }, []);
+  }, [switchWorkspace]);
 
   useHotkeys(map);
   return null;

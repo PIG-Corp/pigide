@@ -47,6 +47,13 @@ export function AgentConfigPanel() {
   };
 
   useEffect(() => {
+    // B-11.2: drop draft state on workspace switch — otherwise editing
+    // an override in workspace A, switching to B, would leave the
+    // draft from A bound to (role, type) that may not exist in B.
+    setDraftRole("builder");
+    setDraftType("");
+    setDraftPrompt("");
+    setDefaultPreview("");
     // eslint-disable-next-line react-hooks/set-state-in-effect
     reload();
     // eslint-disable-next-line react-hooks/exhaustive-deps

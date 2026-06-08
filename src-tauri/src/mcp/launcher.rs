@@ -153,7 +153,26 @@ pub fn merge_project_mcp_json(
         .map_err(|e| Error::Other(format!("serialize: {}", e)))?;
     std::fs::write(&target, serialized)
         .map_err(|e| Error::Other(format!("write {}: {}", target.display(), e)))?;
+    // The file embeds the MCP bearer token, so restrict it to the owner.
+    // Best-effort: a chmod failure must not abort wiring up the tile.
+    restrict_perms_0600(&target);
     Ok(true)
+}
+
+/// Best-effort `chmod 0600` on a file that carries a secret. No-op on
+/// non-Unix; a failure is logged, not fatal.
+fn restrict_perms_0600(path: &Path) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Err(e) = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)) {
+            tracing::warn!("could not chmod 0600 {}: {}", path.display(), e);
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+    }
 }
 
 #[cfg(test)]

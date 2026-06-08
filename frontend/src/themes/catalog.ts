@@ -46,8 +46,7 @@ const t = (
 // ─── Dark ────────────────────────────────────────────────
 
 /**
- * Target — design-spec contract from `/home/camer/pigide/target.png` and
- * `docs/design-spec-target.md` (thread design-target-2026-05).
+ * Target — design-spec contract from `docs/design-spec-target.md`.
  * Default theme. Hex values are the §2 palette and MUST match the spec
  * within ±2% — do not retune.
  */

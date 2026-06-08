@@ -189,6 +189,21 @@ export interface AliasSummary {
   title: string;
 }
 
+export interface ProviderView {
+  id: string;
+  label: string;
+  kind: string;
+  base_url: string;
+  model: string;
+  created_at: string;
+  has_api_key: boolean;
+  is_active: boolean;
+}
+
+export interface ModelEntry {
+  id: string;
+}
+
 export interface MemoryStatus {
   workspace_id: string;
   root: string;

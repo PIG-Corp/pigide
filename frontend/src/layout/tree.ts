@@ -22,6 +22,16 @@ export function leaves(t: LayoutNode): string[] {
 }
 
 /**
+ * True if `leafId` is a live `agentId` referenced by the layout tree.
+ * Guards against stale `focusedLeafId` from a killed/respawned agent or
+ * against `focusedLeafId` pointing at a split node.
+ */
+export function isAgentInLayout(t: LayoutNode, leafId: string | null): boolean {
+  if (!leafId) return false;
+  return leaves(t).includes(leafId);
+}
+
+/**
  * Split a specific leaf in two, with `newAgentId` becoming the second pane.
  */
 export function splitLeaf(

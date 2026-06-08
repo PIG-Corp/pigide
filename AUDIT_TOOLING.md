@@ -1,6 +1,6 @@
 # Tooling Audit Report
 
-Context: repository `/home/camer/pigide`, branch `reset/main-20260517-181552`, commit `cd711e9`.
+Context: repository `pigide`, branch `reset/main-20260517-181552`, commit `cd711e9`.
 
 Scope: read-only audit of build system, config, dependencies, lint/format/test tooling, CI/CD, release flow, and developer experience. Application backend and UI implementation were intentionally ignored.
 

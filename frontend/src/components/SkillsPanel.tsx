@@ -51,17 +51,40 @@ export function SkillsPanel() {
   }
 
   useEffect(() => {
+    // B-1.2: hold a `dead` flag so a listener that resolves AFTER unmount
+    // (e.g. StrictMode double-mount) gets unlistened immediately instead
+    // of being silently leaked.
+    let dead = false;
+    const unsubs: (() => void)[] = [];
+    // B-11.2: reset transient UI state on mount so a remount with stale
+    // local draft doesn't show up. (Skills list is global, not workspace-
+    // scoped, so this is mostly about closing the inspector + clearing
+    // the create form.)
+    setOpenId(null);
+    setCreateId("");
+    setCreateName("");
+    setTab("list");
     refresh();
     refreshTrace();
-    const unsubs: (() => void)[] = [];
     onSkillsReloaded(() => {
+      if (dead) return;
       refresh();
-    }).then((u) => unsubs.push(u));
+    }).then((u) => {
+      if (dead) u();
+      else unsubs.push(u);
+    });
     onSkillsError((e) => {
+      if (dead) return;
       pushToast({ kind: "error", text: `Skill error: ${e.error}` });
       refresh();
-    }).then((u) => unsubs.push(u));
-    return () => unsubs.forEach((u) => u());
+    }).then((u) => {
+      if (dead) u();
+      else unsubs.push(u);
+    });
+    return () => {
+      dead = true;
+      unsubs.forEach((u) => u());
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

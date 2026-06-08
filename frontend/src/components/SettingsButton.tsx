@@ -9,13 +9,16 @@ import { PromptsPanel } from "./PromptsPanel";
 import { AgentConfigPanel } from "./AgentConfigPanel";
 import { SshPresetsPanel } from "./SshPresetsPanel";
 import { ArchitectPanel } from "./ArchitectPanel";
+import { ProvidersPanel } from "./ProvidersPanel";
 import { TransmissionLog } from "./TransmissionLog";
+import { ErrorBoundary } from "./ErrorBoundary";
 
 const STORAGE_KEY = "pigide-settings-last-panel";
 
 type PanelId =
   | "chat"
   | "architect"
+  | "providers"
   | "memory"
   | "skills"
   | "voice"
@@ -33,6 +36,7 @@ interface PanelDef {
 
 const PANELS: PanelDef[] = [
   { id: "architect", label: "Architect" },
+  { id: "providers", label: "Providers" },
   { id: "memory", label: "Memory" },
   { id: "skills", label: "Skills" },
   { id: "voice", label: "Voice" },
@@ -79,7 +83,10 @@ export function SettingsButton() {
   const panelRef = useRef<HTMLDivElement>(null);
   const itemsRef = useRef<(HTMLButtonElement | null)[]>([]);
 
-  const lastPanel = getLastPanel();
+  // B-9.8: read last panel from localStorage once on mount instead of
+  // every render. Also memoize the highlight class name so the menu
+  // doesn't re-render just because some other state changed.
+  const [lastPanel] = useState<PanelId | null>(() => getLastPanel());
 
   const openMenu = useCallback(() => {
     setMenuOpen(true);
@@ -271,17 +278,42 @@ export function SettingsButton() {
             </button>
           </div>
           <div className="settings-panel-overlay__body">
-            {activePanel === "chat" && <OrchestratorPanel />}
-            {activePanel === "architect" && <ArchitectPanel />}
-            {activePanel === "memory" && <MemoryPanel />}
-            {activePanel === "skills" && <SkillsPanel />}
-            {activePanel === "voice" && <VoicePanel />}
-            {activePanel === "browser" && <BrowserPanel />}
-            {activePanel === "files" && <FilesPanel />}
-            {activePanel === "prompts" && <PromptsPanel />}
-            {activePanel === "agents" && <AgentConfigPanel />}
-            {activePanel === "ssh" && <SshPresetsPanel />}
-            {activePanel === "transmission" && <TransmissionLog />}
+            {activePanel === "chat" && (
+              <ErrorBoundary label="Chat panel"><OrchestratorPanel /></ErrorBoundary>
+            )}
+            {activePanel === "architect" && (
+              <ErrorBoundary label="Architect"><ArchitectPanel /></ErrorBoundary>
+            )}
+            {activePanel === "providers" && (
+              <ErrorBoundary label="Providers"><ProvidersPanel /></ErrorBoundary>
+            )}
+            {activePanel === "memory" && (
+              <ErrorBoundary label="Memory"><MemoryPanel /></ErrorBoundary>
+            )}
+            {activePanel === "skills" && (
+              <ErrorBoundary label="Skills"><SkillsPanel /></ErrorBoundary>
+            )}
+            {activePanel === "voice" && (
+              <ErrorBoundary label="Voice"><VoicePanel /></ErrorBoundary>
+            )}
+            {activePanel === "browser" && (
+              <ErrorBoundary label="Browser"><BrowserPanel /></ErrorBoundary>
+            )}
+            {activePanel === "files" && (
+              <ErrorBoundary label="Files"><FilesPanel /></ErrorBoundary>
+            )}
+            {activePanel === "prompts" && (
+              <ErrorBoundary label="Prompts"><PromptsPanel /></ErrorBoundary>
+            )}
+            {activePanel === "agents" && (
+              <ErrorBoundary label="Agents"><AgentConfigPanel /></ErrorBoundary>
+            )}
+            {activePanel === "ssh" && (
+              <ErrorBoundary label="SSH"><SshPresetsPanel /></ErrorBoundary>
+            )}
+            {activePanel === "transmission" && (
+              <ErrorBoundary label="Transmission log"><TransmissionLog /></ErrorBoundary>
+            )}
           </div>
         </div>
       )}

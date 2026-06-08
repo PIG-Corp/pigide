@@ -1,4 +1,5 @@
 import React, { useMemo } from "react";
+import { sanitizeUrl } from "./markdownSanitize";
 
 // Escape HTML utility to prevent XSS
 function escapeHtml(text: string): string {
@@ -10,28 +11,38 @@ function escapeHtml(text: string): string {
     .replace(/'/g, "&#039;");
 }
 
+// B-12.4: max blockquote recursion depth — past this we render text
+// inline instead of recursing.
+const MAX_BLOCKQUOTE_DEPTH = 6;
+
 // Parse inline markdown to HTML string (safely, after escaping raw HTML)
 function parseInline(text: string): string {
   let html = escapeHtml(text);
-  
+
   // Bold: **text** or __text__
   html = html.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
   html = html.replace(/__([^_]+)__/g, "<strong>$1</strong>");
-  
+
   // Italic: *text* or _text_
   html = html.replace(/\*([^*]+)\*/g, "<em>$1</em>");
   html = html.replace(/_([^_]+)_/g, "<em>$1</em>");
-  
+
   // Inline code: `code`
   html = html.replace(/`([^`]+)`/g, "<code>$1</code>");
-  
-  // Links: [label](url)
-  html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
-  
+
+  // Links: [label](url) — sanitize the URL; unsafe schemes render as text.
+  html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_m, label: string, url: string) => {
+    const safe = sanitizeUrl(url);
+    if (safe === null) {
+      return `${label} (${url})`;
+    }
+    return `<a href="${safe}" target="_blank" rel="noopener noreferrer">${label}</a>`;
+  });
+
   return html;
 }
 
-export function Markdown({ content }: { content: string }) {
+export function Markdown({ content, depth = 0 }: { content: string; depth?: number }) {
   const blocks = useMemo(() => {
     if (!content) return [];
     
@@ -73,9 +84,18 @@ export function Markdown({ content }: { content: string }) {
           i++;
         }
         parsedBlocks.push(
-          <blockquote key={`quote-${i}`}>
-            <Markdown content={quoteLines.join("\n")} />
-          </blockquote>
+          // B-12.4: cap blockquote nesting depth. A pathological body like
+          // `>>>>>>>>>>` (100 levels) would otherwise recurse and overflow
+          // the stack. Deeper levels are flattened to plain paragraphs.
+          depth >= MAX_BLOCKQUOTE_DEPTH ? (
+            <blockquote key={`quote-${i}`}>
+              {quoteLines.join("\n")}
+            </blockquote>
+          ) : (
+            <blockquote key={`quote-${i}`}>
+              <Markdown content={quoteLines.join("\n")} depth={depth + 1} />
+            </blockquote>
+          )
         );
         continue;
       }

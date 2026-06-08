@@ -192,10 +192,11 @@ function DictRow({
     if (replacement !== entry.replacement) onUpdate({ replacement });
   };
 
-  const handleKey = (
-    e: React.KeyboardEvent<HTMLInputElement>,
-    commit: () => void,
-  ) => {
+  // B-12.9: previously this handler took a `commit` callback and ended
+  // with `void commit;` to silence an unused-arg lint. The actual commit
+  // happens on `onBlur` after Enter blurs the input, so the param is
+  // dead weight — drop it.
+  const handleKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter") {
       e.currentTarget.blur();
     } else if (e.key === "Escape") {
@@ -203,7 +204,6 @@ function DictRow({
       setReplacement(entry.replacement);
       e.currentTarget.blur();
     }
-    void commit;
   };
 
   return (
@@ -221,7 +221,7 @@ function DictRow({
           value={pattern}
           onChange={(e) => setPattern(e.target.value)}
           onBlur={commitPattern}
-          onKeyDown={(e) => handleKey(e, commitPattern)}
+          onKeyDown={handleKey}
         />
       </span>
       <span className="dict-col-rep">
@@ -230,7 +230,7 @@ function DictRow({
           value={replacement}
           onChange={(e) => setReplacement(e.target.value)}
           onBlur={commitReplacement}
-          onKeyDown={(e) => handleKey(e, commitReplacement)}
+          onKeyDown={handleKey}
         />
       </span>
       <span className="dict-col-cs">

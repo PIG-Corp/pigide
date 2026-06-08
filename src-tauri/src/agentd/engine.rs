@@ -64,8 +64,13 @@ pub struct SpawnRequest {
 /// would save a few cycles but adds a lot of removal-on-EOF complexity.)
 #[derive(Debug, Clone)]
 pub enum EngineEvent {
-    Stdout { agent_id: String, data: Arc<Vec<u8>> },
-    Exit { agent_id: String },
+    Stdout {
+        agent_id: String,
+        data: Arc<Vec<u8>>,
+    },
+    Exit {
+        agent_id: String,
+    },
 }
 
 /// Coarse error type so the broker can map to [`ErrorCode`] without
@@ -96,6 +101,21 @@ impl EngineError {
 }
 
 pub type Result<T> = std::result::Result<T, EngineError>;
+
+/// True when `id` is safe to use as a single filename component. `reuse_id`
+/// is supplied by the client and lands in `format!("{}.log", id)`, so a
+/// crafted id like `../../etc/passwd` would traverse out of the log dir.
+/// Require a non-empty, bounded id of `[A-Za-z0-9._-]` with no `..`.
+pub fn is_safe_agent_id(id: &str) -> bool {
+    if id.is_empty() || id.len() > 128 {
+        return false;
+    }
+    if id.contains("..") {
+        return false;
+    }
+    id.chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.')
+}
 
 struct Runtime {
     info: AgentInfo,
@@ -211,6 +231,14 @@ impl Engine {
     pub fn spawn(self: &Arc<Self>, req: SpawnRequest) -> Result<AgentInfo> {
         if req.bin_path.trim().is_empty() {
             return Err(EngineError::Invalid("bin_path empty".into()));
+        }
+        // `reuse_id` is caller-controlled and lands in the on-disk log path
+        // (`format!("{}.log", id)`). Reject anything that isn't a safe single
+        // filename component so it can't traverse out of the log dir.
+        if let Some(rid) = req.reuse_id.as_deref() {
+            if !is_safe_agent_id(rid) {
+                return Err(EngineError::Invalid(format!("invalid reuse_id: {}", rid)));
+            }
         }
         let id = req.reuse_id.unwrap_or_else(|| Uuid::new_v4().to_string());
 
@@ -346,12 +374,7 @@ impl Engine {
 
     /// Write bytes to the agent's PTY stdin. Returns bytes written.
     /// Same readiness gate semantics as the old AgentManager::write.
-    pub fn write(
-        &self,
-        agent_id: &str,
-        data: &[u8],
-        readiness_timeout: Duration,
-    ) -> Result<usize> {
+    pub fn write(&self, agent_id: &str, data: &[u8], readiness_timeout: Duration) -> Result<usize> {
         let (writer, child, readiness, spawned_at) = {
             let runtimes = self.runtimes.lock();
             let rt = runtimes
@@ -550,7 +573,9 @@ mod tests {
         eng.kill(&info.id).expect("kill");
         // Either NotFound (already removed) or Gone (caught between
         // remove and try_wait) — both are acceptable terminal states.
-        let err = eng.write(&info.id, b"x", Duration::from_millis(100)).unwrap_err();
+        let err = eng
+            .write(&info.id, b"x", Duration::from_millis(100))
+            .unwrap_err();
         assert!(
             matches!(err, EngineError::NotFound(_) | EngineError::Gone(_)),
             "got: {:?}",
@@ -622,10 +647,40 @@ mod tests {
 
     #[test]
     fn engine_error_to_code_mapping() {
-        assert_eq!(EngineError::NotFound("a".into()).code(), ErrorCode::NotFound);
+        assert_eq!(
+            EngineError::NotFound("a".into()).code(),
+            ErrorCode::NotFound
+        );
         assert_eq!(EngineError::Gone("a".into()).code(), ErrorCode::Gone);
         assert_eq!(EngineError::Invalid("a".into()).code(), ErrorCode::Invalid);
         assert_eq!(EngineError::Pty("a".into()).code(), ErrorCode::Io);
+    }
+
+    #[test]
+    fn unsafe_reuse_id_rejected() {
+        let (eng, _dir) = engine_in_temp();
+        let err = eng
+            .spawn(SpawnRequest {
+                workspace_id: "ws".into(),
+                agent_type: "t".into(),
+                cwd: None,
+                bin_path: "/bin/true".into(),
+                argv: vec![],
+                env: vec![],
+                reuse_id: Some("../../etc/passwd".into()),
+                cols: 80,
+                rows: 24,
+            })
+            .unwrap_err();
+        assert!(matches!(err, EngineError::Invalid(_)));
+    }
+
+    #[test]
+    fn is_safe_agent_id_basics() {
+        assert!(is_safe_agent_id("550e8400-e29b-41d4-a716-446655440000"));
+        assert!(!is_safe_agent_id("../x"));
+        assert!(!is_safe_agent_id("a/b"));
+        assert!(!is_safe_agent_id(""));
     }
 
     /// Helper used by the broker binary (and re-exported to ensure the
@@ -640,7 +695,9 @@ mod tests {
         use base64::Engine as _;
         let raw = b"\x00\x01\xfe\xff hello";
         let s = b64_chunk(raw);
-        let back = base64::engine::general_purpose::STANDARD.decode(&s).unwrap();
+        let back = base64::engine::general_purpose::STANDARD
+            .decode(&s)
+            .unwrap();
         assert_eq!(back, raw);
     }
 }

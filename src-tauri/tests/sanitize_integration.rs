@@ -4,7 +4,7 @@ const REAL_ANSI_BLOB: &str =
     "\x1b[2J\x1b[H\x1b[38;2;255;100;0m\x1b[1m❯\x1b[0m \x1b[38;2;100;200;50mcargo build\x1b[0m\n\
     \x1b[K   Compiling pigide v0.1.0\n\
     \x1b[K   \x1b[32mFinished\x1b[0m dev [unoptimized] target(s) in 24.58s\n\
-    \x1b]0;camer@arch: ~/pigide\x07\
+    \x1b]0;user@host: ~/pigide\x07\
     \x1b[38;2;255;100;0m\x1b[1m❯\x1b[0m \x1b[?25h\
     Задача выполнена ✅\n\
     \x1b[?25l\x1b[1;1H";
