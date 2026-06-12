@@ -399,8 +399,14 @@ mod tests {
         fs::write(
             proj.join(".pigmemory").join("aliases.json"),
             r#"{"aliases":["widget","widget plugin"]}"#,
-            Some(vec![]),
-        );
+        )
+        .unwrap();
+        let idx = scan(ScanOptions {
+            roots: vec![root.clone()],
+            max_depth: 5,
+            home_max_depth: 2,
+        });
+        assert_eq!(idx.projects.len(), 1);
         assert!(idx.projects[0].aliases.iter().any(|a| a == "widget"));
         fs::remove_dir_all(&root).ok();
     }
