@@ -607,7 +607,6 @@ mod tests {
     #[test]
     fn any_model_string_is_accepted_and_routed() {
         use super::super::build_provider;
-        use crate::db;
         let manager = r2d2_sqlite::SqliteConnectionManager::memory();
         let pool = r2d2::Pool::builder().max_size(2).build(manager).unwrap();
         let conn = pool.get().unwrap();
@@ -697,7 +696,6 @@ mod tests {
     #[test]
     fn set_model_rejects_empty_after_trim() {
         use super::super::build_provider;
-        use crate::db;
         let manager = r2d2_sqlite::SqliteConnectionManager::memory();
         let pool = r2d2::Pool::builder().max_size(2).build(manager).unwrap();
         let conn = pool.get().unwrap();

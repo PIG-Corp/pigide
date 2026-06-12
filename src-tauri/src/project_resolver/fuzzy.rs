@@ -244,9 +244,6 @@ mod tests {
     #[test]
     fn all_tokens_contained_basic() {
         assert!(all_tokens_contained("widget plugin", "widget-plugin"));
-        assert!(!all_tokens_contained(
-            "kettle plugin",
-            "widget-plugin"
-        ));
+        assert!(!all_tokens_contained("kettle plugin", "widget-plugin"));
     }
 }
