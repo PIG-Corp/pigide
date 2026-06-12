@@ -91,10 +91,7 @@ mod tests {
 
     #[test]
     fn ascii_passthrough() {
-        assert_eq!(
-            transliterate("widget-plugin"),
-            "widget-plugin"
-        );
+        assert_eq!(transliterate("widget-plugin"), "widget-plugin");
         assert_eq!(transliterate("PigIDE 2.0"), "PigIDE 2.0");
     }
 
